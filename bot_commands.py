@@ -193,7 +193,7 @@ async def show_service_details(query, service_id: int, user_id: int):
         sub_repo = SubscriptionRepository(session)
         user_subs = sub_repo.get_user_subscriptions(user_id)
 
-    is_subscribed = any(sub.service_id == service_id for sub in user_subs)
+    is_subscribed = any(sub['service_id'] == service_id for sub in user_subs)
 
     # Build message
     message = (
