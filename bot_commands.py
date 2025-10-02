@@ -277,7 +277,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Update message with translation
         # Keep translate buttons for other languages
         keyboard = []
-        from models import Language
         for lang_enum in Language:
             lang_code = lang_enum.value
             if lang_code != target_lang:

@@ -172,23 +172,25 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         sub_repo = SubscriptionRepository(session)
 
         user = user_repo.get_user(user_id)
+        if not user:
+            await update.message.reply_text(
+                "❌ Sie sind nicht registriert.\n\nVerwenden Sie /start, um sich anzumelden."
+            )
+            return
+
         subs = sub_repo.get_user_subscriptions(user_id)
         total_users = len(user_repo.get_all_users())
-
-    if not user:
-        await update.message.reply_text(
-            "❌ Sie sind nicht registriert.\n\nVerwenden Sie /start, um sich anzumelden."
-        )
-        return
+        user_language = user.language
+        num_subs = len(subs)
 
     start_date, end_date = get_user_date_range(user_id)
 
     message = (
         "📊 <b>Ihr Status</b>\n\n"
         f"👤 User ID: <code>{user_id}</code>\n"
-        f"📋 Abonnements: <b>{len(subs)}</b>\n"
+        f"📋 Abonnements: <b>{num_subs}</b>\n"
         f"📅 Datumsbereich: {start_date} bis {end_date}\n"
-        f"🌐 Sprache: {user.language}\n\n"
+        f"🌐 Sprache: {user_language}\n\n"
         f"👥 Gesamt Benutzer: <b>{total_users}</b>\n\n"
         f"⏱ Prüfintervall: {get_config().check_interval} Sekunden"
     )
