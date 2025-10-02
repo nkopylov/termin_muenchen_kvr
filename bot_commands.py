@@ -14,7 +14,7 @@ from models import Language, Intent
 from i18n import _, TranslationKey
 
 # Old modules (still used)
-from services_manager import categorize_services, get_service_info, get_category_for_service
+from services_manager import categorize_services, get_service_info, get_category_for_service, get_default_office_for_service
 from ai_assistant import parse_user_request, get_official_information, enhance_service_info
 from i18n import translate_text, LANGUAGE_INFO
 from config import get_config
@@ -480,10 +480,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Add subscription
         service_id = int(data[7:])
 
+        # Get the appropriate office for this service
+        office_id = get_default_office_for_service(service_id)
+        if not office_id:
+            await query.answer("❌ Keine passende Behörde gefunden", show_alert=True)
+            return
+
         with get_session() as session:
             sub_repo = SubscriptionRepository(session)
-            # Default office_id = 1 (ABH München)
-            success = sub_repo.add_subscription(user_id, service_id, office_id=1)
+            success = sub_repo.add_subscription(user_id, service_id, office_id=office_id)
 
         if success:
             await query.answer("✅ Abonniert!", show_alert=True)
