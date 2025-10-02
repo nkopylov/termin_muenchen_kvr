@@ -12,17 +12,14 @@ COPY pyproject.toml ./
 RUN uv pip install --system --no-cache -r pyproject.toml
 
 # Copy application code
-COPY telegram_bot.py termin_tracker.py services_manager.py bot_commands.py ai_assistant.py translations.py ./
+COPY telegram_bot.py termin_tracker.py services_manager.py bot_commands.py ai_assistant.py ./
 
-# Copy refactored modules (Phase 1-3)
+# Copy refactored modules
 COPY models.py config.py db_models.py database.py repositories.py i18n.py ./
 
-# Copy Alembic migrations
-COPY alembic.ini ./
-COPY alembic ./alembic
-
-# Copy locale files (when available)
+# Copy locale files
 COPY locales ./locales
+COPY services_catalog.json ./
 
 # Create volume mount point for database
 VOLUME ["/app/data"]

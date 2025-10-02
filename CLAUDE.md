@@ -72,16 +72,6 @@ config = get_config()  # Singleton
 config.telegram_bot_token  # Validated on startup
 ```
 
-## Database Migrations
-
-```bash
-# Create migration after changing db_models.py
-alembic revision --autogenerate -m "Description"
-
-# Apply migrations
-alembic upgrade head
-```
-
 ## Translation Management
 
 ### Adding New Translation Keys
@@ -133,8 +123,6 @@ if not config.openai_model.startswith('gpt-5'):
 
 ## Important File Locations
 
-- **Backups**: `telegram_bot.py.old`, `bot_commands.py.old` contain pre-migration code
-- **Legacy**: `translations.py` is kept as fallback but no longer used
 - **Compiled translations**: `locales/*/LC_MESSAGES/messages.mo` (do not edit directly)
 - **Translation sources**: `locales/*/LC_MESSAGES/messages.po` (edit these)
 
