@@ -113,7 +113,7 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
-async def show_category_services(query, category_name: str):
+async def show_category_services(query, category_name: str, page: int = 0):
     """Show services in a category"""
     categories = categorize_services()
     services = categories.get(category_name, [])
@@ -130,7 +130,6 @@ async def show_category_services(query, category_name: str):
         return
 
     # Show max 10 services per page
-    page = 0
     services_per_page = 10
     total_pages = (len(services) + services_per_page - 1) // services_per_page
 
@@ -169,11 +168,16 @@ async def show_category_services(query, category_name: str):
         total=len(services)
     )
 
-    await query.edit_message_text(
-        f"<b>{category_name}</b>\n\n{pagination_text}",
-        reply_markup=reply_markup,
-        parse_mode='HTML'
-    )
+    try:
+        await query.edit_message_text(
+            f"<b>{category_name}</b>\n\n{pagination_text}",
+            reply_markup=reply_markup,
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        # Ignore "message is not modified" errors
+        if "message is not modified" not in str(e).lower():
+            raise
 
 
 async def show_service_details(query, service_id: int, user_id: int):
@@ -325,8 +329,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parts = data.split(":")
         category = parts[1]
         page = int(parts[2])
-        # TODO: Implement pagination
-        await show_category_services(query, category)
+        await show_category_services(query, category, page)
 
     elif data.startswith("srv:"):
         # Show service details
