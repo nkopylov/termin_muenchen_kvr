@@ -579,14 +579,14 @@ async def myservices_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     message = _(TranslationKey.MY_SUBSCRIPTIONS, lang)
 
     for sub in subscriptions:
-        service_info = get_service_info(sub.service_id)
+        service_info = get_service_info(sub['service_id'])
         if service_info:
             item_text = _(
                 TranslationKey.SERVICE_SUBSCRIPTION_ITEM,
                 lang,
                 name=service_info['name'],
-                id=sub.service_id,
-                date=sub.subscribed_at.strftime('%Y-%m-%d')
+                id=sub['service_id'],
+                date=sub['subscribed_at'][:10]  # Extract date from ISO format
             )
             message += f"{item_text}\n\n"
 
@@ -596,14 +596,14 @@ async def myservices_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if len(subscriptions) <= 10:
         keyboard = []
         for sub in subscriptions:
-            service_info = get_service_info(sub.service_id)
+            service_info = get_service_info(sub['service_id'])
             if service_info:
                 name = service_info['name']
                 if len(name) > 30:
                     name = name[:27] + "..."
                 keyboard.append([InlineKeyboardButton(
                     f"🗑 {name}",
-                    callback_data=f"unsub:{sub.service_id}"
+                    callback_data=f"unsub:{sub['service_id']}"
                 )])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
