@@ -1,0 +1,71 @@
+# German translations for Munich Appointment Bot
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: de\n"
+
+msgid "welcome"
+msgstr "🎯 München Termin Bot - Willkommen! /ask für KI-Hilfe, /subscribe für Dienste"
+
+msgid "language_select"
+msgstr "🌐 Sprache wählen"
+
+msgid "language_changed"
+msgstr "✅ Sprache geändert"
+
+msgid "select_category"
+msgstr "📋 Kategorie auswählen"
+
+msgid "no_services_in_category"
+msgstr "Keine Dienste gefunden"
+
+msgid "services_pagination"
+msgstr "Dienste {start}-{end} von {total}"
+
+msgid "service_not_found"
+msgstr "❌ Dienst nicht gefunden"
+
+msgid "no_subscriptions"
+msgstr "Keine Abonnements. /subscribe zum Abonnieren"
+
+msgid "my_subscriptions"
+msgstr "📋 Ihre Abonnements:"
+
+msgid "total_subscriptions"
+msgstr "📊 Gesamt: {count}"
+
+msgid "subscribed"
+msgstr "✅ Abonniert!"
+
+msgid "unsubscribed"
+msgstr "🗑 Gekündigt"
+
+msgid "service_subscription_item"
+msgstr "📋 {name} (ID: {id}, seit {date})"
+
+msgid "ask_help"
+msgstr "🤖 KI-Assistent - Beispiel: /ask Ich brauche einen Aufenthaltstitel"
+
+msgid "processing_question"
+msgstr "🔍 Verarbeite..."
+
+msgid "no_matching_services"
+msgstr "Keine passenden Dienste gefunden"
+
+msgid "matching_services_found"
+msgstr "🎯 Passende Dienste:"
+
+msgid "tap_service_details"
+msgstr "💡 Tippen für Details"
+
+msgid "information_header"
+msgstr "ℹ️ Information:"
+
+msgid "more_questions"
+msgstr "Weitere Fragen? /ask!"
+
+msgid "no_answer_found"
+msgstr "Keine Antwort gefunden. Versuchen Sie /subscribe"
+
+msgid "translate_to"
+msgstr "🌐 Übersetzen nach {language}"

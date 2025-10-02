@@ -1,0 +1,71 @@
+# English translations for Munich Appointment Bot
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid "welcome"
+msgstr "🎯 Munich Appointment Bot - Welcome! /ask for AI help, /subscribe for services"
+
+msgid "language_select"
+msgstr "🌐 Choose Language"
+
+msgid "language_changed"
+msgstr "✅ Language changed"
+
+msgid "select_category"
+msgstr "📋 Select Category"
+
+msgid "no_services_in_category"
+msgstr "No services found"
+
+msgid "services_pagination"
+msgstr "Services {start}-{end} of {total}"
+
+msgid "service_not_found"
+msgstr "❌ Service not found"
+
+msgid "no_subscriptions"
+msgstr "No subscriptions. Use /subscribe"
+
+msgid "my_subscriptions"
+msgstr "📋 Your Subscriptions:"
+
+msgid "total_subscriptions"
+msgstr "📊 Total: {count}"
+
+msgid "subscribed"
+msgstr "✅ Subscribed!"
+
+msgid "unsubscribed"
+msgstr "🗑 Cancelled"
+
+msgid "service_subscription_item"
+msgstr "📋 {name} (ID: {id}, since {date})"
+
+msgid "ask_help"
+msgstr "🤖 AI Assistant - Example: /ask I need a residence permit"
+
+msgid "processing_question"
+msgstr "🔍 Processing..."
+
+msgid "no_matching_services"
+msgstr "No matching services found"
+
+msgid "matching_services_found"
+msgstr "🎯 Matching services:"
+
+msgid "tap_service_details"
+msgstr "💡 Tap for details"
+
+msgid "information_header"
+msgstr "ℹ️ Information:"
+
+msgid "more_questions"
+msgstr "More questions? Use /ask!"
+
+msgid "no_answer_found"
+msgstr "No answer found. Try /subscribe"
+
+msgid "translate_to"
+msgstr "🌐 Translate to {language}"

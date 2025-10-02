@@ -1,0 +1,545 @@
+"""
+Telegram bot command handlers with button-based interface
+"""
+import logging
+from datetime import datetime, timedelta
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from services_manager import categorize_services, get_service_info, get_category_for_service
+from ai_assistant import parse_user_request, get_official_information, enhance_service_info
+from translations import get_message, translate_text, LANGUAGES, get_language_name, get_language_flag
+
+logger = logging.getLogger(__name__)
+
+# Import database functions (will be injected)
+_db_funcs = None
+
+def inject_db_functions(funcs):
+    """Inject database functions"""
+    global _db_funcs
+    _db_funcs = funcs
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /start command - show language selection first, then welcome"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
+
+    # Ensure user exists in database
+    subscribers = _db_funcs['load_subscribers']()
+    if user_id not in subscribers:
+        today = datetime.now()
+        end_date = today + timedelta(days=180)
+        _db_funcs['save_subscriber'](user_id, username, today.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+
+        # Show language selection for new users
+        await show_language_selection(update, context)
+    else:
+        # Existing user - show welcome in their language
+        lang = _db_funcs['get_user_language'](user_id)
+        await update.message.reply_text(
+            get_message('welcome', lang),
+            parse_mode='HTML'
+        )
+
+
+async def show_language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, query=None):
+    """Show language selection keyboard"""
+    keyboard = [
+        [
+            InlineKeyboardButton("🇩🇪 Deutsch", callback_data="lang:de"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang:en")
+        ],
+        [
+            InlineKeyboardButton("🇷🇺 Русский", callback_data="lang:ru")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    message_text = "🌐 <b>Choose your language / Wählen Sie Ihre Sprache / Выберите язык</b>"
+
+    if query:
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /language command - change language"""
+    await show_language_selection(update, context)
+
+
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show category selection"""
+    categories = categorize_services()
+
+    # Create category buttons (2 per row)
+    keyboard = []
+    cat_items = list(categories.items())
+
+    for i in range(0, len(cat_items), 2):
+        row = []
+        for j in range(2):
+            if i + j < len(cat_items):
+                category, services = cat_items[i + j]
+                row.append(InlineKeyboardButton(
+                    f"{category} ({len(services)})",
+                    callback_data=f"cat:{category}"
+                ))
+        keyboard.append(row)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    user_id = update.effective_user.id
+    lang = _db_funcs['get_user_language'](user_id)
+
+    await update.message.reply_text(
+        get_message('select_category', lang),
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
+async def show_category_services(query, category_name: str):
+    """Show services in a category"""
+    categories = categorize_services()
+    services = categories.get(category_name, [])
+
+    user_id = query.from_user.id
+    lang = _db_funcs['get_user_language'](user_id)
+
+    if not services:
+        await query.edit_message_text(get_message('no_services_in_category', lang))
+        return
+
+    # Show max 10 services per page
+    page = 0
+    services_per_page = 10
+    total_pages = (len(services) + services_per_page - 1) // services_per_page
+
+    start_idx = page * services_per_page
+    end_idx = min(start_idx + services_per_page, len(services))
+    page_services = services[start_idx:end_idx]
+
+    keyboard = []
+    for service in page_services:
+        # Truncate long names
+        name = service['name']
+        if len(name) > 50:
+            name = name[:47] + "..."
+
+        keyboard.append([InlineKeyboardButton(
+            name,
+            callback_data=f"srv:{service['id']}"
+        )])
+
+    # Navigation buttons
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("◀️ Zurück", callback_data=f"catpage:{category_name}:{page-1}"))
+    nav_row.append(InlineKeyboardButton("🏠 Kategorien", callback_data="categories"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Weiter ▶️", callback_data=f"catpage:{category_name}:{page+1}"))
+    keyboard.append(nav_row)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    pagination_text = get_message('services_pagination', lang).format(
+        start=start_idx + 1,
+        end=end_idx,
+        total=len(services)
+    )
+
+    await query.edit_message_text(
+        f"<b>{category_name}</b>\n\n{pagination_text}",
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
+async def show_service_details(query, service_id: int, user_id: int):
+    """Show service details and subscribe button"""
+    service_info = get_service_info(service_id)
+
+    if not service_info:
+        await query.edit_message_text("❌ Dienst nicht gefunden.")
+        return
+
+    # Check if already subscribed
+    user_subs = _db_funcs['get_user_subscriptions'](user_id)
+    is_subscribed = any(sub['service_id'] == service_id for sub in user_subs)
+
+    # Build message
+    message = (
+        f"<b>{service_info['name']}</b>\n\n"
+        f"Service ID: <code>{service_info['id']}</code>\n"
+    )
+
+    if service_info.get('maxQuantity'):
+        message += f"Max. Anzahl: {service_info['maxQuantity']}\n"
+
+    message += f"\nStatus: {'✅ Abonniert' if is_subscribed else '⭕ Nicht abonniert'}"
+
+    # Build keyboard
+    keyboard = []
+    if is_subscribed:
+        keyboard.append([InlineKeyboardButton(
+            "🗑 Abonnement kündigen",
+            callback_data=f"unsub:{service_id}"
+        )])
+    else:
+        keyboard.append([InlineKeyboardButton(
+            "✅ Abonnieren",
+            callback_data=f"addsub:{service_id}"
+        )])
+
+    # Back button
+    category = get_category_for_service(service_id)
+    if category:
+        keyboard.append([InlineKeyboardButton("◀️ Zurück", callback_data=f"cat:{category}")])
+    keyboard.append([InlineKeyboardButton("🏠 Kategorien", callback_data="categories")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button callbacks"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    data = query.data
+
+    # Handle language selection
+    if data.startswith("lang:"):
+        lang_code = data[5:]
+        _db_funcs['set_user_language'](user_id, lang_code)
+
+        # Show confirmation and welcome message
+        await query.answer(get_message('language_changed', lang_code), show_alert=True)
+        await query.edit_message_text(
+            get_message('welcome', lang_code),
+            parse_mode='HTML'
+        )
+        return
+
+    # Handle translation requests
+    if data.startswith("translate:"):
+        parts = data.split(":")
+        target_lang = parts[1]
+        message_id = parts[2] if len(parts) > 2 else None
+
+        # Get original message text
+        original_text = query.message.text_html
+
+        # Remove existing disclaimer if present
+        for lang in ['de', 'en', 'ru']:
+            disclaimer = get_message('translation_disclaimer', lang)
+            original_text = original_text.replace(disclaimer, '')
+
+        # Translate
+        translated = await translate_text(original_text, target_lang)
+        translated += get_message('translation_disclaimer', target_lang)
+
+        # Update message with translation
+        # Keep translate buttons for other languages
+        keyboard = []
+        for lang_code, lang_info in LANGUAGES.items():
+            if lang_code != target_lang:
+                # Create translate button text manually since get_message doesn't support nested formatting
+                button_text = f"{lang_info['flag']} Translate to {lang_info['name']}"
+                keyboard.append([InlineKeyboardButton(
+                    button_text,
+                    callback_data=f"translate:{lang_code}:{message_id}"
+                )])
+
+        reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+        await query.edit_message_text(translated, reply_markup=reply_markup, parse_mode='HTML')
+        return
+
+    if data == "categories":
+        # Show all categories
+        categories = categorize_services()
+        keyboard = []
+        cat_items = list(categories.items())
+
+        for i in range(0, len(cat_items), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(cat_items):
+                    category, services = cat_items[i + j]
+                    row.append(InlineKeyboardButton(
+                        f"{category} ({len(services)})",
+                        callback_data=f"cat:{category}"
+                    ))
+            keyboard.append(row)
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📋 <b>Kategorie auswählen:</b>",
+            reply_markup=reply_markup,
+            parse_mode='HTML'
+        )
+
+    elif data.startswith("cat:"):
+        # Show services in category
+        category = data[4:]
+        await show_category_services(query, category)
+
+    elif data.startswith("catpage:"):
+        # Paginated category view
+        parts = data.split(":")
+        category = parts[1]
+        page = int(parts[2])
+        # TODO: Implement pagination
+        await show_category_services(query, category)
+
+    elif data.startswith("srv:"):
+        # Show service details
+        service_id = int(data[4:])
+        await show_service_details(query, service_id, user_id)
+
+    elif data.startswith("addsub:"):
+        # Add subscription
+        service_id = int(data[7:])
+        success = _db_funcs['add_service_subscription'](user_id, service_id)
+
+        if success:
+            await query.answer("✅ Abonniert!", show_alert=True)
+            await show_service_details(query, service_id, user_id)
+        else:
+            await query.answer("❌ Fehler beim Abonnieren", show_alert=True)
+
+    elif data.startswith("unsub:"):
+        # Remove subscription
+        service_id = int(data[6:])
+        _db_funcs['remove_service_subscription'](user_id, service_id)
+        await query.answer("🗑 Abonnement gekündigt", show_alert=True)
+        await show_service_details(query, service_id, user_id)
+
+
+async def myservices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user's active subscriptions"""
+    user_id = update.effective_user.id
+    lang = _db_funcs['get_user_language'](user_id)
+    subscriptions = _db_funcs['get_user_subscriptions'](user_id)
+
+    if not subscriptions:
+        await update.message.reply_text(
+            get_message('no_subscriptions', lang)
+        )
+        return
+
+    message = get_message('my_subscriptions', lang)
+
+    for sub in subscriptions:
+        service_info = get_service_info(sub['service_id'])
+        if service_info:
+            item_text = get_message('service_subscription_item', lang).format(
+                name=service_info['name'],
+                id=sub['service_id'],
+                date=sub['subscribed_at'][:10]
+            )
+            message += f"{item_text}\n\n"
+
+    message += get_message('total_subscriptions', lang).format(count=len(subscriptions))
+
+    # Add unsubscribe buttons
+    if len(subscriptions) <= 10:
+        keyboard = []
+        for sub in subscriptions:
+            service_info = get_service_info(sub['service_id'])
+            if service_info:
+                name = service_info['name']
+                if len(name) > 30:
+                    name = name[:27] + "..."
+                keyboard.append([InlineKeyboardButton(
+                    f"🗑 {name}",
+                    callback_data=f"unsub:{sub['service_id']}"
+                )])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(message, parse_mode='HTML')
+
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Unsubscribe from all services"""
+    user_id = update.effective_user.id
+    subscribers = _db_funcs['load_subscribers']()
+
+    if user_id in subscribers:
+        _db_funcs['remove_subscriber'](user_id)
+        await update.message.reply_text(
+            "❌ Alle Abonnements gekündigt.\n\n"
+            "Verwenden Sie /start, um erneut zu abonnieren."
+        )
+    else:
+        await update.message.reply_text(
+            "Sie haben keine aktiven Abonnements."
+        )
+
+
+async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    AI-powered command to understand freeform user requests
+    Usage: /ask Ich brauche einen neuen Personalausweis
+    """
+    user_id = update.effective_user.id
+    lang = _db_funcs['get_user_language'](user_id)
+
+    if not context.args:
+        await update.message.reply_text(
+            get_message('ask_help', lang),
+            parse_mode='HTML'
+        )
+        return
+
+    user_query = ' '.join(context.args)
+
+    # Show typing indicator
+    await update.message.chat.send_action(action="typing")
+
+    logger.info(f"AI request from user {user_id}: {user_query}")
+
+    # Get user language
+    lang = _db_funcs['get_user_language'](user_id)
+
+    # Parse request with AI
+    result = parse_user_request(user_query, max_suggestions=5, user_language=lang)
+
+    if result['intent'] == 'information_request':
+        # User is asking for information, not looking for a service
+        # Detect query language and use it for the response
+        query_lang = lang  # Default to user's preference
+
+        # Simple language detection based on character sets
+        if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in user_query):
+            query_lang = 'ru'  # Cyrillic detected
+
+        await update.message.reply_text(
+            get_message('processing_question', query_lang),
+            parse_mode='HTML'
+        )
+
+        answer = get_official_information(user_query, user_language=query_lang)
+
+        if answer:
+            message = get_message('information_header', query_lang)
+            message += f"{answer}\n\n"
+            message += get_message('more_questions', query_lang)
+
+            # AI already responds in user's language, no translation needed
+            await update.message.reply_text(message, parse_mode='HTML')
+        else:
+            await update.message.reply_text(
+                get_message('no_answer_found', lang),
+                parse_mode='HTML'
+            )
+
+    else:
+        # Service search - suggest matching services
+        suggested_ids = result['suggested_services']
+
+        if not suggested_ids:
+            await update.message.reply_text(
+                get_message('no_matching_services', lang),
+                parse_mode='HTML'
+            )
+            return
+
+        # Build message with suggested services
+        message = get_message('matching_services_found', lang)
+
+        if result['explanation']:
+            message += f"<i>{result['explanation']}</i>\n\n"
+
+        # Create keyboard with service buttons
+        keyboard = []
+        for service_id in suggested_ids:
+            service_info = get_service_info(service_id)
+            if service_info:
+                name = service_info['name']
+                if len(name) > 45:
+                    name = name[:42] + "..."
+
+                message += f"📋 {service_info['name']}\n"
+
+                keyboard.append([InlineKeyboardButton(
+                    f"✅ {name}",
+                    callback_data=f"srv:{service_id}"
+                )])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        message += get_message('tap_service_details', lang)
+
+        await update.message.reply_text(
+            message,
+            reply_markup=reply_markup,
+            parse_mode='HTML'
+        )
+
+
+async def enhanced_service_details(query, service_id: int, user_id: int):
+    """Show service details with AI-enhanced information"""
+    service_info = get_service_info(service_id)
+
+    lang = _db_funcs['get_user_language'](user_id)
+
+    if not service_info:
+        await query.edit_message_text(get_message('service_not_found', lang))
+        return
+
+    # Check if already subscribed
+    user_subs = _db_funcs['get_user_subscriptions'](user_id)
+    is_subscribed = any(sub['service_id'] == service_id for sub in user_subs)
+
+    # Build message
+    message = f"<b>{service_info['name']}</b>\n\n"
+
+    # Get AI-enhanced description
+    lang = _db_funcs['get_user_language'](user_id)
+    enhanced_info = enhance_service_info(service_id, user_language=lang)
+    if enhanced_info:
+        message += f"ℹ️ <i>{enhanced_info}</i>\n\n"
+
+    message += f"Service ID: <code>{service_info['id']}</code>\n"
+
+    if service_info.get('maxQuantity'):
+        message += f"Max. Anzahl: {service_info['maxQuantity']}\n"
+
+    message += f"\nStatus: {'✅ Abonniert' if is_subscribed else '⭕ Nicht abonniert'}"
+
+    # Build keyboard
+    keyboard = []
+    if is_subscribed:
+        keyboard.append([InlineKeyboardButton(
+            "🗑 Abonnement kündigen",
+            callback_data=f"unsub:{service_id}"
+        )])
+    else:
+        keyboard.append([InlineKeyboardButton(
+            "✅ Abonnieren",
+            callback_data=f"addsub:{service_id}"
+        )])
+
+    # Back button
+    category = get_category_for_service(service_id)
+    if category:
+        keyboard.append([InlineKeyboardButton("◀️ Zurück", callback_data=f"cat:{category}")])
+    keyboard.append([InlineKeyboardButton("🏠 Kategorien", callback_data="categories")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
