@@ -7,7 +7,7 @@ import asyncio
 import logging
 import json
 from datetime import datetime, timedelta
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # New architecture imports
@@ -412,6 +412,22 @@ async def post_init(application: Application) -> None:
     """Post-initialization callback"""
     stats['bot_start_time'] = datetime.now()
 
+    # Set bot commands for menu
+    commands = [
+        BotCommand("start", "Start the bot and register"),
+        BotCommand("menu", "Show main menu"),
+        BotCommand("subscribe", "Subscribe to services"),
+        BotCommand("myservices", "View your subscriptions"),
+        BotCommand("ask", "AI-powered service search"),
+        BotCommand("language", "Change language"),
+        BotCommand("setdates", "Set date range filter"),
+        BotCommand("status", "Show your status"),
+        BotCommand("stats", "Show bot statistics"),
+        BotCommand("stop", "Cancel all subscriptions"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands registered")
+
     # Load initial stats
     with get_session() as session:
         user_repo = UserRepository(session)
@@ -447,6 +463,7 @@ def main() -> None:
     application.add_handler(CommandHandler("stats", stats_command))
 
     # Import and register bot_commands handlers
+    application.add_handler(CommandHandler("menu", bot_commands.menu_command))
     application.add_handler(CommandHandler("subscribe", bot_commands.subscribe_command))
     application.add_handler(CommandHandler("myservices", bot_commands.myservices_command))
     application.add_handler(CommandHandler("language", bot_commands.language_command))

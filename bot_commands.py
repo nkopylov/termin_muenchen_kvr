@@ -17,8 +17,111 @@ from i18n import _, TranslationKey
 from services_manager import categorize_services, get_service_info, get_category_for_service
 from ai_assistant import parse_user_request, get_official_information, enhance_service_info
 from i18n import translate_text, LANGUAGE_INFO
+from config import get_config
 
 logger = logging.getLogger(__name__)
+
+
+async def show_main_menu(query, user_id: int):
+    """Show main menu as inline message"""
+    with get_session() as session:
+        user_repo = UserRepository(session)
+        lang_code = user_repo.get_user_language(user_id)
+        lang = Language(lang_code)
+
+    config = get_config()
+    has_ai = config.has_openai
+
+    # Build menu message
+    menu_text = "🏠 <b>Main Menu</b>\n\nChoose an action:"
+
+    # Build keyboard with main actions
+    keyboard = [
+        [InlineKeyboardButton("📋 Subscribe to Services", callback_data="categories")],
+        [InlineKeyboardButton("📊 My Subscriptions", callback_data="myservices")],
+    ]
+
+    if has_ai:
+        keyboard.append([InlineKeyboardButton("🤖 AI Assistant", callback_data="ask_help")])
+
+    keyboard.extend([
+        [InlineKeyboardButton("🌐 Change Language", callback_data="change_language")],
+        [InlineKeyboardButton("📈 Bot Statistics", callback_data="show_stats")],
+    ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(menu_text, reply_markup=reply_markup, parse_mode='HTML')
+
+
+async def show_stats_inline(query):
+    """Show bot statistics inline"""
+    from telegram_bot import stats
+
+    with get_session() as session:
+        user_repo = UserRepository(session)
+        total_users = len(user_repo.get_all_users())
+
+    success_rate = 0
+    if stats['total_checks'] > 0:
+        success_rate = (stats['successful_checks'] / stats['total_checks']) * 100
+
+    message = (
+        "📈 <b>Bot Statistics</b>\n\n"
+        f"👥 Users: {total_users}\n"
+        f"🔍 Total checks: {stats['total_checks']}\n"
+        f"✅ Successful: {stats['successful_checks']}\n"
+        f"❌ Failed: {stats['failed_checks']}\n"
+        f"📊 Success rate: {success_rate:.1f}%\n"
+        f"🎯 Appointments found: {stats['appointments_found_count']}"
+    )
+
+    keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show main menu with action buttons"""
+    user_id = update.effective_user.id
+
+    with get_session() as session:
+        user_repo = UserRepository(session)
+        user = user_repo.get_user(user_id)
+
+        if not user:
+            # Not registered, redirect to /start
+            await update.message.reply_text(
+                "👋 Welcome! Please use /start to register first.",
+                parse_mode='HTML'
+            )
+            return
+
+        lang_code = user.language
+        lang = Language(lang_code)
+
+    config = get_config()
+    has_ai = config.has_openai
+
+    # Build menu message
+    menu_text = "🏠 <b>Main Menu</b>\n\nChoose an action:"
+
+    # Build keyboard with main actions
+    keyboard = [
+        [InlineKeyboardButton("📋 Subscribe to Services", callback_data="categories")],
+        [InlineKeyboardButton("📊 My Subscriptions", callback_data="myservices")],
+    ]
+
+    if has_ai:
+        keyboard.append([InlineKeyboardButton("🤖 AI Assistant", callback_data="ask_help")])
+
+    keyboard.extend([
+        [InlineKeyboardButton("🌐 Change Language", callback_data="change_language")],
+        [InlineKeyboardButton("📈 Bot Statistics", callback_data="show_stats")],
+    ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode='HTML')
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -46,8 +149,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             # Existing user - show welcome in their language
             lang = Language(user.language)
+            welcome_msg = _(TranslationKey.WELCOME, lang)
+
+            # Add menu button
+            keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
             await update.message.reply_text(
-                _(TranslationKey.WELCOME, lang),
+                welcome_msg,
+                reply_markup=reply_markup,
                 parse_mode='HTML'
             )
 
@@ -241,6 +351,32 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     user_id = update.effective_user.id
     data = query.data
+
+    # Handle main menu
+    if data == "main_menu":
+        await show_main_menu(query, user_id)
+        return
+
+    # Handle menu actions
+    if data == "change_language":
+        await show_language_selection(None, None, query)
+        return
+
+    if data == "ask_help":
+        with get_session() as session:
+            user_repo = UserRepository(session)
+            lang_code = user_repo.get_user_language(user_id)
+            lang = Language(lang_code)
+
+        await query.edit_message_text(
+            _(TranslationKey.ASK_HELP, lang),
+            parse_mode='HTML'
+        )
+        return
+
+    if data == "show_stats":
+        await show_stats_inline(query)
+        return
 
     # Handle language selection
     if data.startswith("lang:"):
