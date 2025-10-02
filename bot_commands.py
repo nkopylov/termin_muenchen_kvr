@@ -378,6 +378,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await show_stats_inline(query)
         return
 
+    if data == "myservices":
+        await show_myservices(query, user_id)
+        return
+
     # Handle language selection
     if data.startswith("lang:"):
         lang_code = data[5:]
@@ -497,6 +501,61 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         await query.answer("🗑 Abonnement gekündigt", show_alert=True)
         await show_service_details(query, service_id, user_id)
+
+
+async def show_myservices(query, user_id: int):
+    """Show user's subscriptions inline"""
+    with get_session() as session:
+        user_repo = UserRepository(session)
+        sub_repo = SubscriptionRepository(session)
+
+        lang_code = user_repo.get_user_language(user_id)
+        lang = Language(lang_code)
+        subscriptions = sub_repo.get_user_subscriptions(user_id)
+
+    if not subscriptions:
+        keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            _(TranslationKey.NO_SUBSCRIPTIONS, lang),
+            reply_markup=reply_markup
+        )
+        return
+
+    message = _(TranslationKey.MY_SUBSCRIPTIONS, lang)
+
+    for sub in subscriptions:
+        service_info = get_service_info(sub['service_id'])
+        if service_info:
+            item_text = _(
+                TranslationKey.SERVICE_SUBSCRIPTION_ITEM,
+                lang,
+                name=service_info['name'],
+                id=sub['service_id'],
+                date=sub['subscribed_at'][:10]  # Extract date from ISO format
+            )
+            message += f"{item_text}\n\n"
+
+    message += _(TranslationKey.TOTAL_SUBSCRIPTIONS, lang, count=len(subscriptions))
+
+    # Add navigation buttons
+    keyboard = []
+    if len(subscriptions) <= 10:
+        for sub in subscriptions:
+            service_info = get_service_info(sub['service_id'])
+            if service_info:
+                name = service_info['name']
+                if len(name) > 40:
+                    name = name[:37] + "..."
+                keyboard.append([InlineKeyboardButton(
+                    f"🗑 {name}",
+                    callback_data=f"unsub:{sub['service_id']}"
+                )])
+
+    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
 
 
 async def myservices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
