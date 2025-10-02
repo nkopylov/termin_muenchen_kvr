@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Dict, Optional
 from enum import Enum
 import logging
+import requests
+import json
 
 from models import Language
 
@@ -14,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 # Translation directory
 LOCALE_DIR = Path(__file__).parent / "locales"
+
+# Language metadata for UI elements
+LANGUAGE_INFO = {
+    Language.DE: {'name': 'Deutsch', 'flag': '🇩🇪'},
+    Language.EN: {'name': 'English', 'flag': '🇬🇧'},
+    Language.RU: {'name': 'Русский', 'flag': '🇷🇺'}
+}
 
 
 class TranslationKey(str, Enum):
@@ -159,3 +168,76 @@ def _(
         Translated string
     """
     return get_translator().get(key, lang, **kwargs)
+
+
+async def translate_text(text: str, target_lang: str, source_lang: str = 'de') -> str:
+    """
+    Translate text using OpenAI API
+
+    Args:
+        text: Text to translate
+        target_lang: Target language code (en, de, ru)
+        source_lang: Source language code
+
+    Returns:
+        Translated text
+    """
+    from config import get_config
+
+    config = get_config()
+
+    if not config.has_openai:
+        logger.warning("OPENAI_API_KEY not set, translation unavailable")
+        return text
+
+    lang_names = {
+        'de': 'German',
+        'en': 'English',
+        'ru': 'Russian'
+    }
+
+    source_name = lang_names.get(source_lang, 'German')
+    target_name = lang_names.get(target_lang, 'English')
+
+    system_prompt = f"""You are a professional translator. Translate the following text from {source_name} to {target_name}.
+Maintain the original formatting, including HTML tags like <b>, <i>, <code>, <a>.
+Keep technical terms and service names in the original language when appropriate.
+Preserve all URLs and links exactly as they are."""
+
+    try:
+        headers = {
+            'Authorization': f'Bearer {config.openai_api_key}',
+            'Content-Type': 'application/json'
+        }
+
+        payload = {
+            'model': config.openai_model,
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': text}
+            ],
+            'max_completion_tokens': 1000
+        }
+
+        logger.info(f"Translating text from {source_lang} to {target_lang}")
+        logger.debug(f"OpenAI request payload: {json.dumps(payload, ensure_ascii=False)}")
+
+        response = requests.post(config.openai_api_url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+
+        result = response.json()
+        translated = result['choices'][0]['message']['content']
+
+        logger.info("Translation completed successfully")
+        return translated
+
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Translation failed: {e}")
+        logger.error(f"Request payload: {json.dumps(payload, ensure_ascii=False)}")
+        if hasattr(e.response, 'text'):
+            logger.error(f"Response body: {e.response.text}")
+        return text
+    except Exception as e:
+        logger.error(f"Translation failed: {e}")
+        logger.error(f"Request payload: {json.dumps(payload, ensure_ascii=False)}")
+        return text

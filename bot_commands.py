@@ -16,7 +16,7 @@ from i18n import _, TranslationKey
 # Old modules (still used)
 from services_manager import categorize_services, get_service_info, get_category_for_service
 from ai_assistant import parse_user_request, get_official_information, enhance_service_info
-from translations import translate_text, LANGUAGES
+from i18n import translate_text, LANGUAGE_INFO
 
 logger = logging.getLogger(__name__)
 
@@ -277,9 +277,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Update message with translation
         # Keep translate buttons for other languages
         keyboard = []
-        for lang_code, lang_info in LANGUAGES.items():
+        from models import Language
+        for lang_enum in Language:
+            lang_code = lang_enum.value
             if lang_code != target_lang:
-                # Create translate button text manually since get_message doesn't support nested formatting
+                lang_info = LANGUAGE_INFO[lang_enum]
                 button_text = f"{lang_info['flag']} Translate to {lang_info['name']}"
                 keyboard.append([InlineKeyboardButton(
                     button_text,
