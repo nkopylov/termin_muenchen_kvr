@@ -502,7 +502,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         with get_session() as session:
             sub_repo = SubscriptionRepository(session)
-            sub_repo.delete_subscription(user_id, service_id)
+            sub_repo.remove_subscription(user_id, service_id)
 
         await query.answer("🗑 Abonnement gekündigt", show_alert=True)
         await show_service_details(query, service_id, user_id)
