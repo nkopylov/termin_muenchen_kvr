@@ -17,7 +17,7 @@ from repositories import UserRepository, SubscriptionRepository, AppointmentLogR
 from models import Language
 
 # Old modules (to be migrated)
-from termin_tracker import get_fresh_captcha_token, get_available_days
+from termin_tracker import get_fresh_captcha_token, get_available_days, get_available_slots
 from services_manager import get_service_info
 import bot_commands
 
@@ -79,6 +79,42 @@ def format_available_appointments(data) -> str:
         return ""
 
     result = ""
+
+    # Handle Munich API format with time slots
+    if isinstance(data, dict) and 'slots_by_date' in data:
+        slots_by_date = data['slots_by_date']
+        available_days = data.get('availableDays', [])
+
+        if slots_by_date:
+            # Show dates with time slots
+            for date, times in list(slots_by_date.items())[:5]:
+                if times:
+                    # Show first 5 time slots
+                    time_str = ', '.join(times[:5])
+                    result += f"📅 {date}: {time_str}\n"
+                else:
+                    # Date available but no time slots fetched
+                    result += f"📅 {date}\n"
+
+            # Show remaining days count
+            remaining = len(available_days) - len(slots_by_date)
+            if remaining > 0:
+                result += f"... und {remaining} weitere Tage\n"
+
+        return result.strip()
+
+    # Handle Munich API format without slots: {'availableDays': [{'time': '2025-10-13', 'providerIDs': '10461'}]}
+    if isinstance(data, dict) and 'availableDays' in data:
+        available_days = data['availableDays']
+        if available_days:
+            for day in available_days[:5]:
+                date = day.get('time', 'Unknown date')
+                result += f"📅 {date}\n"
+            if len(available_days) > 5:
+                result += f"... und {len(available_days) - 5} weitere Tage\n"
+        return result.strip()
+
+    # Legacy format handling
     if isinstance(data, dict):
         for date, times in data.items():
             if times:
@@ -341,6 +377,7 @@ async def check_and_notify(application: Application) -> None:
 
                     # Check if appointments are available
                     appointments_found = False
+                    slots_by_date = {}  # Will store {date: [time slots]}
 
                     if isinstance(data, dict):
                         if "errorCode" in data:
@@ -348,13 +385,35 @@ async def check_and_notify(application: Application) -> None:
                             stats['failed_checks'] += 1
                             consecutive_failures += 1
                         elif data and len(data) > 0:
-                            appointments_found = True
+                            # Extract available days from response
+                            available_days = data.get('availableDays', [])
+                            if available_days:
+                                appointments_found = True
+
+                                # Fetch time slots for each available day (max 5 days)
+                                for day_info in available_days[:5]:
+                                    date = day_info.get('time')
+                                    if date:
+                                        slots_data = get_available_slots(date, str(office_id), str(service_id), captcha_token)
+                                        if slots_data and isinstance(slots_data, dict):
+                                            # Extract time slots from the response
+                                            appointments = slots_data.get('appointments', [])
+                                            if appointments:
+                                                times = [apt.get('time', apt.get('start', '')) for apt in appointments[:5]]
+                                                slots_by_date[date] = times
+                                        else:
+                                            # Fallback: just show the date without times
+                                            slots_by_date[date] = []
+
+                                # Update data to include slots
+                                data['slots_by_date'] = slots_by_date
                     elif isinstance(data, list) and len(data) > 0:
                         appointments_found = True
 
                     if appointments_found:
                         logger.info(f"✅ Appointments found for {service_name}! Notifying {len(date_user_ids)} users")
                         logger.info(f"📋 Full API response: {data}")
+                        logger.info(f"📋 Slots by date: {slots_by_date}")
                         stats['successful_checks'] += 1
                         stats['last_success_time'] = datetime.now()
                         stats['appointments_found_count'] += 1

@@ -165,6 +165,50 @@ def get_fresh_captcha_token():
         logger.error("Captcha flow failed: could not verify solution")
     return token
 
+def get_available_slots(date, office_id, service_id, captcha_token):
+    """
+    Get available time slots for a specific date.
+    date: e.g. '2025-10-13'
+    office_id: e.g. '10461'
+    service_id: e.g. '10339028'
+    captcha_token: JWT token from the website
+    Returns the available time slots for that date.
+    """
+    url = "https://www48.muenchen.de/buergeransicht/api/citizen/available-appointments/"
+
+    params = {
+        "date": date,
+        "officeId": office_id,
+        "serviceId": service_id,
+        "serviceCounts[]": "1",
+        "captchaToken": captcha_token
+    }
+
+    headers = {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Origin": "https://stadt.muenchen.de",
+        "Referer": "https://stadt.muenchen.de/",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
+        "Priority": "u=3, i"
+    }
+
+    try:
+        logger.debug(f"Fetching slots for {date} (office={office_id}, service={service_id})")
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching slots for {date}: {e}")
+        return None
+
+
 def get_available_days(start_date, end_date, captcha_token, office_id="10461", service_id="10339028"):
     """
     Check available days in a date range.
