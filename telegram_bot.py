@@ -389,31 +389,12 @@ async def check_and_notify(application: Application) -> None:
                             available_days = data.get('availableDays', [])
                             if available_days:
                                 appointments_found = True
-
-                                # Fetch time slots for each available day (max 5 days)
-                                for day_info in available_days[:5]:
-                                    date = day_info.get('time')
-                                    if date:
-                                        slots_data = get_available_slots(date, str(office_id), str(service_id), captcha_token)
-                                        if slots_data and isinstance(slots_data, dict):
-                                            # Extract time slots from the response
-                                            appointments = slots_data.get('appointments', [])
-                                            if appointments:
-                                                times = [apt.get('time', apt.get('start', '')) for apt in appointments[:5]]
-                                                slots_by_date[date] = times
-                                        else:
-                                            # Fallback: just show the date without times
-                                            slots_by_date[date] = []
-
-                                # Update data to include slots
-                                data['slots_by_date'] = slots_by_date
                     elif isinstance(data, list) and len(data) > 0:
                         appointments_found = True
 
                     if appointments_found:
                         logger.info(f"✅ Appointments found for {service_name}! Notifying {len(date_user_ids)} users")
                         logger.info(f"📋 Full API response: {data}")
-                        logger.info(f"📋 Slots by date: {slots_by_date}")
                         stats['successful_checks'] += 1
                         stats['last_success_time'] = datetime.now()
                         stats['appointments_found_count'] += 1
@@ -424,40 +405,88 @@ async def check_and_notify(application: Application) -> None:
                             log_repo = AppointmentLogRepository(session)
                             log_repo.log_appointment(service_id, office_id, data)
 
-                        # Parse available dates/times
-                        appointments_detail = format_available_appointments(data)
-
                         # Build booking URL
                         booking_url = config.get_booking_url_for_service(service_id, office_id)
 
-                        # Format the message
-                        message = (
+                        # STEP 1: Send immediate notification with dates only
+                        available_days = data.get('availableDays', [])
+                        initial_dates = '\n'.join([f"📅 {day.get('time')}" for day in available_days[:5]])
+                        if len(available_days) > 5:
+                            initial_dates += f"\n... und {len(available_days) - 5} weitere Tage"
+
+                        initial_message = (
+                            "🎉 <b>TERMIN VERFÜGBAR!</b> 🎉\n\n"
+                            f"<b>{service_name}</b>\n\n"
+                            f"Verfügbare Termine:\n{initial_dates}\n\n"
+                            f"🔗 <a href='{booking_url}'>Jetzt Termin buchen!</a>\n\n"
+                            "⏳ Zeiten werden geladen..."
+                        )
+
+                        # Send initial messages and store message IDs for updating
+                        message_ids = {}
+                        for user_id in date_user_ids:
+                            try:
+                                sent_msg = await application.bot.send_message(
+                                    chat_id=user_id,
+                                    text=initial_message,
+                                    parse_mode='HTML',
+                                    disable_web_page_preview=False
+                                )
+                                message_ids[user_id] = sent_msg.message_id
+                                logger.info(f"Sent initial notification to user {user_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to send initial notification to user {user_id}: {e}")
+
+                        # STEP 2: Fetch time slots and update messages progressively
+                        for day_info in available_days[:5]:
+                            date = day_info.get('time')
+                            if date:
+                                slots_data = get_available_slots(date, str(office_id), str(service_id), captcha_token)
+                                if slots_data and isinstance(slots_data, dict):
+                                    # Extract time slots from the response
+                                    appointments = slots_data.get('appointments', [])
+                                    if appointments:
+                                        times = [apt.get('time', apt.get('start', '')) for apt in appointments[:5]]
+                                        slots_by_date[date] = times
+                                else:
+                                    # Fallback: just show the date without times
+                                    slots_by_date[date] = []
+
+                        # Update data to include slots
+                        data['slots_by_date'] = slots_by_date
+                        logger.info(f"📋 Slots by date: {slots_by_date}")
+
+                        # STEP 3: Update all messages with final time slot information
+                        appointments_detail = format_available_appointments(data)
+
+                        final_message = (
                             "🎉 <b>TERMIN VERFÜGBAR!</b> 🎉\n\n"
                             f"<b>{service_name}</b>\n\n"
                         )
 
                         if appointments_detail:
-                            message += f"Verfügbare Termine:\n{appointments_detail}\n"
+                            final_message += f"Verfügbare Termine:\n{appointments_detail}\n\n"
                         else:
-                            message += f"📅 Zeitraum: {start_date} bis {end_date}\n\n"
+                            final_message += f"Verfügbare Termine:\n{initial_dates}\n\n"
 
-                        message += (
+                        final_message += (
                             f"🔗 <a href='{booking_url}'>Jetzt Termin buchen!</a>\n\n"
                             "⚡ Schnell handeln - Termine werden schnell vergeben!"
                         )
 
-                        # Notify all users for this date range
-                        for user_id in date_user_ids:
+                        # Update all messages with time slots
+                        for user_id, msg_id in message_ids.items():
                             try:
-                                await application.bot.send_message(
+                                await application.bot.edit_message_text(
                                     chat_id=user_id,
-                                    text=message,
+                                    message_id=msg_id,
+                                    text=final_message,
                                     parse_mode='HTML',
                                     disable_web_page_preview=False
                                 )
-                                logger.info(f"Notified user {user_id} about {service_name}")
+                                logger.info(f"Updated message for user {user_id} with time slots")
                             except Exception as e:
-                                logger.error(f"Failed to notify user {user_id}: {e}")
+                                logger.error(f"Failed to update message for user {user_id}: {e}")
                     else:
                         logger.info(f"No appointments available for {service_name} ({start_date} to {end_date})")
                         stats['successful_checks'] += 1
