@@ -438,7 +438,6 @@ async def check_and_notify(application: Application) -> None:
                                 logger.error(f"Failed to send initial notification to user {user_id}: {e}")
 
                         # STEP 2: Fetch time slots and update messages progressively
-                        from datetime import datetime
                         for day_info in available_days[:5]:
                             date = day_info.get('time')
                             if date:
