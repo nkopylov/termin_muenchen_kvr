@@ -82,7 +82,18 @@ def format_available_appointments(data) -> str:
     if isinstance(data, dict):
         for date, times in data.items():
             if times:
-                result += f"📅 {date}: {', '.join(times[:3])}\n"
+                # Handle times as list of strings or list of dicts
+                if isinstance(times, list):
+                    time_strs = []
+                    for t in times[:3]:
+                        if isinstance(t, dict):
+                            # Extract time from dict (e.g., {'time': '09:00', ...})
+                            time_strs.append(str(t.get('time', t.get('slot', str(t)))))
+                        else:
+                            time_strs.append(str(t))
+                    result += f"📅 {date}: {', '.join(time_strs)}\n"
+                else:
+                    result += f"📅 {date}: {times}\n"
     elif isinstance(data, list):
         for item in data[:5]:
             if isinstance(item, dict) and 'date' in item:
@@ -343,6 +354,7 @@ async def check_and_notify(application: Application) -> None:
 
                     if appointments_found:
                         logger.info(f"✅ Appointments found for {service_name}! Notifying {len(date_user_ids)} users")
+                        logger.info(f"📋 Full API response: {data}")
                         stats['successful_checks'] += 1
                         stats['last_success_time'] = datetime.now()
                         stats['appointments_found_count'] += 1
