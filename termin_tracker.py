@@ -167,34 +167,34 @@ def get_fresh_captcha_token():
 
 def get_available_slots(date, office_id, service_id, captcha_token):
     """
-    Get available time slots for a specific date.
+    Get available time slots for a specific date using available-appointments-by-office endpoint.
+
     date: e.g. '2025-10-13'
-    office_id: e.g. '10461'
+    office_id: e.g. '10461' (can be comma-separated for multiple offices)
     service_id: e.g. '10339028'
-    captcha_token: JWT token from the website
-    Returns the available time slots for that date.
+    captcha_token: JWT token from the website (required for Ausländerbehörde services)
 
-    Note: This endpoint is very strict about parameters and may return 403 if:
-    - CAPTCHA token is invalid/expired
-    - Parameter format is incorrect
-    - Missing required headers
+    Returns: {
+        "offices": [
+            {
+                "officeId": 10461,
+                "appointments": [1760340600, 1760340900, ...]  # Unix timestamps
+            }
+        ]
+    }
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/available-appointments/"
+    url = "https://www48.muenchen.de/buergeransicht/api/citizen/available-appointments-by-office/"
 
-    # Try different parameter formats - the API is picky about this
     params = {
         "date": date,
         "officeId": office_id,
         "serviceId": service_id,
+        "serviceCount": "1",
         "captchaToken": captcha_token
     }
 
-    # Add serviceCounts as array - try multiple formats
-    # Format 1: serviceCounts[0]=1
-    params["serviceCounts[0]"] = "1"
-
     headers = {
-        "Accept": "application/json, text/plain, */*",
+        "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
@@ -212,7 +212,10 @@ def get_available_slots(date, office_id, service_id, captcha_token):
         response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        logger.debug(f"Successfully fetched {len(data.get('appointments', []))} slots for {date}")
+
+        # Count total appointments across all offices
+        total_appointments = sum(len(office.get('appointments', [])) for office in data.get('offices', []))
+        logger.debug(f"Successfully fetched {total_appointments} slots for {date}")
         return data
     except requests.exceptions.HTTPError as e:
         logger.warning(f"HTTP {e.response.status_code} error fetching slots for {date}")
@@ -221,9 +224,6 @@ def get_available_slots(date, office_id, service_id, captcha_token):
             logger.warning(f"Error details: {error_data}")
         except:
             logger.warning(f"Response text: {e.response.text[:200]}")
-
-        # Return None on 403 - it's likely a CAPTCHA issue, not critical
-        # The message will still show dates without times
         return None
     except Exception as e:
         logger.error(f"Unexpected error fetching slots for {date}: {e}")

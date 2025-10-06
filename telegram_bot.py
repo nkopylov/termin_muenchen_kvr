@@ -438,16 +438,28 @@ async def check_and_notify(application: Application) -> None:
                                 logger.error(f"Failed to send initial notification to user {user_id}: {e}")
 
                         # STEP 2: Fetch time slots and update messages progressively
+                        from datetime import datetime
                         for day_info in available_days[:5]:
                             date = day_info.get('time')
                             if date:
                                 slots_data = get_available_slots(date, str(office_id), str(service_id), captcha_token)
                                 if slots_data and isinstance(slots_data, dict):
-                                    # Extract time slots from the response
-                                    appointments = slots_data.get('appointments', [])
-                                    if appointments:
-                                        times = [apt.get('time', apt.get('start', '')) for apt in appointments[:5]]
-                                        slots_by_date[date] = times
+                                    # New API format: {"offices": [{"officeId": X, "appointments": [timestamps]}]}
+                                    offices = slots_data.get('offices', [])
+                                    if offices:
+                                        # Get appointments from first office (we only query one)
+                                        appointments_timestamps = offices[0].get('appointments', [])
+                                        if appointments_timestamps:
+                                            # Convert Unix timestamps to HH:MM format (show first 5)
+                                            times = []
+                                            for ts in appointments_timestamps[:5]:
+                                                dt = datetime.fromtimestamp(ts)
+                                                times.append(dt.strftime('%H:%M'))
+                                            slots_by_date[date] = times
+                                        else:
+                                            slots_by_date[date] = []
+                                    else:
+                                        slots_by_date[date] = []
                                 else:
                                     # Fallback: just show the date without times
                                     slots_by_date[date] = []
