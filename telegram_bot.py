@@ -7,6 +7,7 @@ import asyncio
 import logging
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -445,16 +446,19 @@ async def check_and_notify(application: Application) -> None:
                                 if slots_data and isinstance(slots_data, dict):
                                     # New API format: {"offices": [{"officeId": X, "appointments": [timestamps]}]}
                                     offices = slots_data.get('offices', [])
+                                    logger.debug(f"Slots API response for {date}: {slots_data}")
                                     if offices:
                                         # Get appointments from first office (we only query one)
                                         appointments_timestamps = offices[0].get('appointments', [])
                                         if appointments_timestamps:
                                             # Convert Unix timestamps to HH:MM format (show first 5)
+                                            # Use Europe/Berlin timezone for Munich appointments
                                             times = []
                                             for ts in appointments_timestamps[:5]:
-                                                dt = datetime.fromtimestamp(ts)
+                                                dt = datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Berlin"))
                                                 times.append(dt.strftime('%H:%M'))
                                             slots_by_date[date] = times
+                                            logger.debug(f"Fetched {len(appointments_timestamps)} slots for {date}, showing first 5: {times}")
                                         else:
                                             slots_by_date[date] = []
                                     else:
