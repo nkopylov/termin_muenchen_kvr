@@ -173,19 +173,28 @@ def get_available_slots(date, office_id, service_id, captcha_token):
     service_id: e.g. '10339028'
     captcha_token: JWT token from the website
     Returns the available time slots for that date.
+
+    Note: This endpoint is very strict about parameters and may return 403 if:
+    - CAPTCHA token is invalid/expired
+    - Parameter format is incorrect
+    - Missing required headers
     """
     url = "https://www48.muenchen.de/buergeransicht/api/citizen/available-appointments/"
 
+    # Try different parameter formats - the API is picky about this
     params = {
         "date": date,
         "officeId": office_id,
         "serviceId": service_id,
-        "serviceCounts[]": "1",
         "captchaToken": captcha_token
     }
 
+    # Add serviceCounts as array - try multiple formats
+    # Format 1: serviceCounts[0]=1
+    params["serviceCounts[0]"] = "1"
+
     headers = {
-        "Accept": "*/*",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
@@ -203,9 +212,21 @@ def get_available_slots(date, office_id, service_id, captcha_token):
         response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
+        logger.debug(f"Successfully fetched {len(data.get('appointments', []))} slots for {date}")
         return data
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"HTTP {e.response.status_code} error fetching slots for {date}")
+        try:
+            error_data = e.response.json()
+            logger.warning(f"Error details: {error_data}")
+        except:
+            logger.warning(f"Response text: {e.response.text[:200]}")
+
+        # Return None on 403 - it's likely a CAPTCHA issue, not critical
+        # The message will still show dates without times
+        return None
     except Exception as e:
-        logger.error(f"Error fetching slots for {date}: {e}")
+        logger.error(f"Unexpected error fetching slots for {date}: {e}")
         return None
 
 
