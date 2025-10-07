@@ -344,6 +344,63 @@ async def show_service_details(query, service_id: int, user_id: int):
     )
 
 
+async def show_office_selection(query, service_id: int, user_id: int):
+    """Show office selection for a service subscription"""
+    from services_manager import get_offices_for_service
+
+    service_info = get_service_info(service_id)
+    if not service_info:
+        await query.edit_message_text("❌ Dienst nicht gefunden.")
+        return
+
+    # Get all offices that support this service
+    offices = get_offices_for_service(service_id)
+
+    if not offices:
+        await query.edit_message_text(
+            f"❌ Keine Behörden für '{service_info['name']}' gefunden.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("◀️ Zurück", callback_data=f"srv:{service_id}")
+            ]])
+        )
+        return
+
+    # Build message
+    message = (
+        f"<b>{service_info['name']}</b>\n\n"
+        f"📍 Bitte wählen Sie eine Behörde:\n"
+        f"({len(offices)} verfügbar)"
+    )
+
+    # Build keyboard with office options (max 10 per page for now)
+    keyboard = []
+    for office in offices[:20]:  # Show first 20 offices
+        office_name = office.get('name', f"Office {office['id']}")
+        # Shorten long names
+        if len(office_name) > 45:
+            office_name = office_name[:42] + "..."
+
+        keyboard.append([InlineKeyboardButton(
+            f"📍 {office_name}",
+            callback_data=f"selectoffice:{service_id}:{office['id']}"
+        )])
+
+    # Add note if there are more offices
+    if len(offices) > 20:
+        message += f"\n\n⚠️ Nur die ersten 20 von {len(offices)} Behörden werden angezeigt."
+
+    # Back button
+    keyboard.append([InlineKeyboardButton("◀️ Zurück", callback_data=f"srv:{service_id}")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button callbacks"""
     query = update.callback_query
@@ -477,14 +534,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await show_service_details(query, service_id, user_id)
 
     elif data.startswith("addsub:"):
-        # Add subscription
+        # Show office selection for subscription
         service_id = int(data[7:])
+        await show_office_selection(query, service_id, user_id)
 
-        # Get the appropriate office for this service
-        office_id = get_default_office_for_service(service_id)
-        if not office_id:
-            await query.answer("❌ Keine passende Behörde gefunden", show_alert=True)
-            return
+    elif data.startswith("selectoffice:"):
+        # User selected an office - add subscription
+        parts = data.split(":")
+        service_id = int(parts[1])
+        office_id = int(parts[2])
 
         with get_session() as session:
             sub_repo = SubscriptionRepository(session)
@@ -539,6 +597,9 @@ async def show_myservices(query, user_id: int):
                 id=sub['service_id'],
                 date=sub['subscribed_at'][:10]  # Extract date from ISO format
             )
+            # Add office information
+            office_id = sub.get('office_id', 'Unknown')
+            item_text += f"\n   📍 Office ID: {office_id}"
             message += f"{item_text}\n\n"
 
     message += _(TranslationKey.TOTAL_SUBSCRIPTIONS, lang, count=len(subscriptions))

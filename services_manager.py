@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # API endpoints
 SERVICES_API = "https://www48.muenchen.de/buergeransicht/api/citizen/services"
 OFFICES_API = "https://www48.muenchen.de/buergeransicht/api/citizen/offices"
+OFFICES_AND_SERVICES_API = "https://www48.muenchen.de/buergeransicht/api/citizen/offices-and-services/"
 
 # Category definitions
 CATEGORY_KEYWORDS = {
@@ -31,6 +32,7 @@ CATEGORY_KEYWORDS = {
 # Cache for services
 _services_cache = None
 _offices_cache = None
+_full_payload_cache = None
 
 
 def fetch_services() -> Optional[List[Dict]]:
@@ -69,6 +71,29 @@ def fetch_offices() -> Optional[List[Dict]]:
         return None
 
 
+def fetch_full_payload() -> Optional[Dict]:
+    """
+    Fetch the complete offices-and-services payload.
+    This contains offices, services, and relations arrays.
+    The relations array is the authoritative source for service-to-office mappings.
+    """
+    try:
+        headers = {
+            'Accept': 'application/json',
+            'Origin': 'https://stadt.muenchen.de',
+            'Referer': 'https://stadt.muenchen.de/',
+            'User-Agent': 'Mozilla/5.0'
+        }
+        response = requests.get(OFFICES_AND_SERVICES_API, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        logger.info(f"Fetched full payload with {len(data.get('relations', []))} relations")
+        return data
+    except Exception as e:
+        logger.error(f"Failed to fetch full payload: {e}")
+        return None
+
+
 def get_services() -> List[Dict]:
     """Get services (cached)"""
     global _services_cache
@@ -83,6 +108,14 @@ def get_offices() -> List[Dict]:
     if _offices_cache is None:
         _offices_cache = fetch_offices()
     return _offices_cache or []
+
+
+def get_full_payload() -> Dict:
+    """Get full payload (cached)"""
+    global _full_payload_cache
+    if _full_payload_cache is None:
+        _full_payload_cache = fetch_full_payload()
+    return _full_payload_cache or {'offices': [], 'services': [], 'relations': []}
 
 
 def categorize_services() -> Dict[str, List[Dict]]:
@@ -154,26 +187,30 @@ def get_category_for_service(service_id: int) -> Optional[str]:
 
 def get_offices_for_service(service_id: int) -> List[Dict]:
     """
-    Get all offices that support a specific service.
+    Get designated offices for a specific service from the relations array.
+    This returns ONLY the offices that are designated for appointment booking,
+    not all offices that technically support the service.
+
     Returns a list of office dictionaries with id, name, and scope information.
     """
-    try:
-        headers = {
-            'Accept': 'application/json',
-            'Origin': 'https://stadt.muenchen.de',
-            'Referer': 'https://stadt.muenchen.de/',
-            'User-Agent': 'Mozilla/5.0'
-        }
-        url = f"https://www48.muenchen.de/buergeransicht/api/citizen/offices-and-services/?serviceId={service_id}"
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        offices = data.get('offices', [])
-        logger.info(f"Service {service_id} is available at {len(offices)} offices")
-        return offices
-    except Exception as e:
-        logger.error(f"Failed to fetch offices for service {service_id}: {e}")
-        return []
+    payload = get_full_payload()
+
+    # Find matching relations for this service (only public ones)
+    office_ids = [
+        r['officeId']
+        for r in payload.get('relations', [])
+        if r['serviceId'] == service_id and r.get('public', True)
+    ]
+
+    # Get office details for these IDs
+    offices = [
+        office
+        for office in payload.get('offices', [])
+        if office['id'] in office_ids
+    ]
+
+    logger.info(f"Service {service_id} has {len(offices)} designated office(s) from relations array")
+    return offices
 
 
 def get_default_office_for_service(service_id: int) -> Optional[int]:
@@ -221,9 +258,11 @@ def get_default_office_for_service(service_id: int) -> Optional[int]:
 # Refresh cache on module load
 def refresh_cache():
     """Force refresh of cached data"""
-    global _services_cache, _offices_cache
+    global _services_cache, _offices_cache, _full_payload_cache
     _services_cache = None
     _offices_cache = None
+    _full_payload_cache = None
     get_services()
     get_offices()
+    get_full_payload()
     logger.info("Service cache refreshed")

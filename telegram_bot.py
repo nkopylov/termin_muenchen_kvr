@@ -8,7 +8,7 @@ import logging
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from telegram import Update, BotCommand
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # New architecture imports
@@ -21,6 +21,7 @@ from models import Language
 from termin_tracker import get_fresh_captcha_token, get_available_days, get_available_slots
 from services_manager import get_service_info
 import bot_commands
+from booking_handler import booking_conversation
 
 # Configure logging
 logging.basicConfig(
@@ -489,7 +490,32 @@ async def check_and_notify(application: Application) -> None:
                             "⚡ Schnell handeln - Termine werden schnell vergeben!"
                         )
 
-                        # Update all messages with time slots
+                        # Create inline keyboard with booking buttons for each available date
+                        keyboard = []
+                        for day_info in available_days[:5]:  # Show first 5 dates
+                            date = day_info.get('time')
+                            if date:
+                                keyboard.append([
+                                    InlineKeyboardButton(
+                                        f"📅 Buchen: {date}",
+                                        callback_data=f"book_{date}_{office_id}_{service_id}"
+                                    )
+                                ])
+
+                        # Add link to manual booking
+                        keyboard.append([
+                            InlineKeyboardButton(
+                                "🔗 Manuell auf Website buchen",
+                                url=booking_url
+                            )
+                        ])
+
+                        reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
+                        # Store captcha token in bot_data for booking flow
+                        application.bot_data['captcha_token'] = captcha_token
+
+                        # Update all messages with time slots and booking buttons
                         for user_id, msg_id in message_ids.items():
                             try:
                                 await application.bot.edit_message_text(
@@ -497,9 +523,10 @@ async def check_and_notify(application: Application) -> None:
                                     message_id=msg_id,
                                     text=final_message,
                                     parse_mode='HTML',
-                                    disable_web_page_preview=False
+                                    disable_web_page_preview=False,
+                                    reply_markup=reply_markup
                                 )
-                                logger.info(f"Updated message for user {user_id} with time slots")
+                                logger.info(f"Updated message for user {user_id} with time slots and booking buttons")
                             except Exception as e:
                                 logger.error(f"Failed to update message for user {user_id}: {e}")
                     else:
@@ -583,6 +610,9 @@ def main() -> None:
     application.add_handler(CommandHandler("myservices", bot_commands.myservices_command))
     application.add_handler(CommandHandler("language", bot_commands.language_command))
     application.add_handler(CommandHandler("ask", bot_commands.ask_command))
+
+    # Register booking conversation handler (must be before generic callback handler)
+    application.add_handler(booking_conversation)
 
     # Register callback query handler
     application.add_handler(CallbackQueryHandler(bot_commands.button_callback))

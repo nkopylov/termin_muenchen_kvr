@@ -57,10 +57,10 @@ class BotConfig(BaseSettings):
         description="Default Munich office ID"
     )
     check_interval: int = Field(
-        120,
-        ge=30,
+        15,
+        ge=5,
         le=600,
-        description="Interval in seconds between appointment checks"
+        description="Interval in seconds between appointment checks (default: 15)"
     )
 
     @field_validator('telegram_bot_token')
@@ -81,8 +81,8 @@ class BotConfig(BaseSettings):
     @classmethod
     def validate_check_interval(cls, v: int) -> int:
         """Ensure check interval is reasonable"""
-        if v < 30:
-            raise ValueError("check_interval must be at least 30 seconds")
+        if v < 5:
+            raise ValueError("check_interval must be at least 5 seconds")
         if v > 600:
             raise ValueError("check_interval must be at most 600 seconds (10 minutes)")
         return v
