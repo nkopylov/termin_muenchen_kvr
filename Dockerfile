@@ -11,13 +11,10 @@ COPY pyproject.toml ./
 # Install dependencies using uv
 RUN uv pip install --system --no-cache -r pyproject.toml
 
-# Copy application code
-COPY telegram_bot.py termin_tracker.py services_manager.py bot_commands.py ai_assistant.py ./
+# Copy all Python files
+COPY *.py ./
 
-# Copy refactored modules
-COPY models.py config.py db_models.py database.py repositories.py i18n.py ./
-
-# Copy locale files
+# Copy locale files and data
 COPY locales ./locales
 COPY services_catalog.json ./
 
