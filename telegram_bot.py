@@ -2,8 +2,8 @@
 Munich Appointment Bot - Main Entry Point
 Minimal bot setup that wires together all commands and handlers.
 """
+
 import logging
-import asyncio
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
@@ -29,8 +29,7 @@ from src.services.appointment_checker import check_and_notify, set_bot_start_tim
 
 # Configure logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,12 @@ def main() -> None:
     init_database()
 
     # Create application
-    application = Application.builder().token(config.telegram_bot_token).post_init(post_init).build()
+    application = (
+        Application.builder()
+        .token(config.telegram_bot_token)
+        .post_init(post_init)
+        .build()
+    )
 
     # Register command handlers
     application.add_handler(CommandHandler("start", start_command))
@@ -90,5 +94,5 @@ def main() -> None:
     application.run_polling(allowed_updates=["message", "callback_query"])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

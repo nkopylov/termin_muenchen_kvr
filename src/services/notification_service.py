@@ -2,6 +2,7 @@
 Notification service for sending appointment availability alerts to users.
 Handles both initial notifications and progressive updates with time slots.
 """
+
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -23,16 +24,16 @@ def format_available_appointments(data) -> str:
     result = ""
 
     # Handle Munich API format with time slots
-    if isinstance(data, dict) and 'slots_by_date' in data:
-        slots_by_date = data['slots_by_date']
-        available_days = data.get('availableDays', [])
+    if isinstance(data, dict) and "slots_by_date" in data:
+        slots_by_date = data["slots_by_date"]
+        available_days = data.get("availableDays", [])
 
         if slots_by_date:
             # Show dates with time slots
             for date, times in list(slots_by_date.items())[:5]:
                 if times:
                     # Show first 5 time slots
-                    time_str = ', '.join(times[:5])
+                    time_str = ", ".join(times[:5])
                     result += f"📅 {date}: {time_str}\n"
                 else:
                     # Date available but no time slots fetched
@@ -46,11 +47,11 @@ def format_available_appointments(data) -> str:
         return result.strip()
 
     # Handle Munich API format without slots: {'availableDays': [{'time': '2025-10-13', 'providerIDs': '10461'}]}
-    if isinstance(data, dict) and 'availableDays' in data:
-        available_days = data['availableDays']
+    if isinstance(data, dict) and "availableDays" in data:
+        available_days = data["availableDays"]
         if available_days:
             for day in available_days[:5]:
-                date = day.get('time', 'Unknown date')
+                date = day.get("time", "Unknown date")
                 result += f"📅 {date}\n"
             if len(available_days) > 5:
                 result += f"... und {len(available_days) - 5} weitere Tage\n"
@@ -66,7 +67,7 @@ def format_available_appointments(data) -> str:
                     for t in times[:3]:
                         if isinstance(t, dict):
                             # Extract time from dict (e.g., {'time': '09:00', ...})
-                            time_strs.append(str(t.get('time', t.get('slot', str(t)))))
+                            time_strs.append(str(t.get("time", t.get("slot", str(t)))))
                         else:
                             time_strs.append(str(t))
                     result += f"📅 {date}: {', '.join(time_strs)}\n"
@@ -74,7 +75,7 @@ def format_available_appointments(data) -> str:
                     result += f"📅 {date}: {times}\n"
     elif isinstance(data, list):
         for item in data[:5]:
-            if isinstance(item, dict) and 'date' in item:
+            if isinstance(item, dict) and "date" in item:
                 result += f"📅 {item['date']}\n"
             elif isinstance(item, str):
                 result += f"📅 {item}\n"
@@ -89,7 +90,7 @@ async def notify_users_of_appointment(
     office_id: int,
     service_name: str,
     data: dict,
-    captcha_token: str
+    captcha_token: str,
 ) -> None:
     """
     Notify users about available appointments with progressive updates.
@@ -105,10 +106,10 @@ async def notify_users_of_appointment(
     """
     config = get_config()
     booking_url = config.get_booking_url_for_service(service_id, office_id)
-    available_days = data.get('availableDays', [])
+    available_days = data.get("availableDays", [])
 
     # STEP 1: Send immediate notification with dates only
-    initial_dates = '\n'.join([f"📅 {day.get('time')}" for day in available_days[:5]])
+    initial_dates = "\n".join([f"📅 {day.get('time')}" for day in available_days[:5]])
     if len(available_days) > 5:
         initial_dates += f"\n... und {len(available_days) - 5} weitere Tage"
 
@@ -125,15 +126,17 @@ async def notify_users_of_appointment(
     for user_id in user_ids:
         # Skip users currently in booking conversation
         if is_user_in_queue(user_id):
-            logger.info(f"Skipping notification for user {user_id} - booking in progress")
+            logger.info(
+                f"Skipping notification for user {user_id} - booking in progress"
+            )
             continue
 
         try:
             sent_msg = await application.bot.send_message(
                 chat_id=user_id,
                 text=initial_message,
-                parse_mode='HTML',
-                disable_web_page_preview=False
+                parse_mode="HTML",
+                disable_web_page_preview=False,
             )
             message_ids[user_id] = sent_msg.message_id
             logger.info(f"Sent initial notification to user {user_id}")
@@ -143,25 +146,31 @@ async def notify_users_of_appointment(
     # STEP 2: Fetch time slots and build slots_by_date
     slots_by_date = {}  # {date: [time slots]}
     for day_info in available_days[:5]:
-        date = day_info.get('time')
+        date = day_info.get("time")
         if date:
-            slots_data = get_available_slots(date, str(office_id), str(service_id), captcha_token)
+            slots_data = get_available_slots(
+                date, str(office_id), str(service_id), captcha_token
+            )
             if slots_data and isinstance(slots_data, dict):
                 # New API format: {"offices": [{"officeId": X, "appointments": [timestamps]}]}
-                offices = slots_data.get('offices', [])
+                offices = slots_data.get("offices", [])
                 logger.debug(f"Slots API response for {date}: {slots_data}")
                 if offices:
                     # Get appointments from first office (we only query one)
-                    appointments_timestamps = offices[0].get('appointments', [])
+                    appointments_timestamps = offices[0].get("appointments", [])
                     if appointments_timestamps:
                         # Convert Unix timestamps to HH:MM format (show first 5)
                         # Use Europe/Berlin timezone for Munich appointments
                         times = []
                         for ts in appointments_timestamps[:5]:
-                            dt = datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Berlin"))
-                            times.append(dt.strftime('%H:%M'))
+                            dt = datetime.fromtimestamp(
+                                ts, tz=ZoneInfo("Europe/Berlin")
+                            )
+                            times.append(dt.strftime("%H:%M"))
                         slots_by_date[date] = times
-                        logger.debug(f"Fetched {len(appointments_timestamps)} slots for {date}, showing first 5: {times}")
+                        logger.debug(
+                            f"Fetched {len(appointments_timestamps)} slots for {date}, showing first 5: {times}"
+                        )
                     else:
                         slots_by_date[date] = []
                 else:
@@ -171,16 +180,13 @@ async def notify_users_of_appointment(
                 slots_by_date[date] = []
 
     # Update data to include slots
-    data['slots_by_date'] = slots_by_date
+    data["slots_by_date"] = slots_by_date
     logger.info(f"📋 Slots by date: {slots_by_date}")
 
     # STEP 3: Update all messages with final time slot information
     appointments_detail = format_available_appointments(data)
 
-    final_message = (
-        "🎉 <b>TERMIN VERFÜGBAR!</b> 🎉\n\n"
-        f"<b>{service_name}</b>\n\n"
-    )
+    final_message = "🎉 <b>TERMIN VERFÜGBAR!</b> 🎉\n\n" f"<b>{service_name}</b>\n\n"
 
     if appointments_detail:
         final_message += f"Verfügbare Termine:\n{appointments_detail}\n\n"
@@ -195,27 +201,26 @@ async def notify_users_of_appointment(
     # Create inline keyboard with booking buttons for each available date
     keyboard = []
     for day_info in available_days[:5]:  # Show first 5 dates
-        date = day_info.get('time')
+        date = day_info.get("time")
         if date:
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"📅 Buchen: {date}",
-                    callback_data=f"book_{date}_{office_id}_{service_id}"
-                )
-            ])
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        f"📅 Buchen: {date}",
+                        callback_data=f"book_{date}_{office_id}_{service_id}",
+                    )
+                ]
+            )
 
     # Add link to manual booking
-    keyboard.append([
-        InlineKeyboardButton(
-            "🔗 Manuell auf Website buchen",
-            url=booking_url
-        )
-    ])
+    keyboard.append(
+        [InlineKeyboardButton("🔗 Manuell auf Website buchen", url=booking_url)]
+    )
 
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
     # Store captcha token in bot_data for booking flow
-    application.bot_data['captcha_token'] = captcha_token
+    application.bot_data["captcha_token"] = captcha_token
 
     # Update all messages with time slots and booking buttons
     for user_id, msg_id in message_ids.items():
@@ -224,10 +229,12 @@ async def notify_users_of_appointment(
                 chat_id=user_id,
                 message_id=msg_id,
                 text=final_message,
-                parse_mode='HTML',
+                parse_mode="HTML",
                 disable_web_page_preview=False,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
             )
-            logger.info(f"Updated message for user {user_id} with time slots and booking buttons")
+            logger.info(
+                f"Updated message for user {user_id} with time slots and booking buttons"
+            )
         except Exception as e:
             logger.error(f"Failed to update message for user {user_id}: {e}")

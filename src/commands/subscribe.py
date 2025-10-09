@@ -1,6 +1,7 @@
 """
 /subscribe command - Show service category selection for subscriptions
 """
+
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -23,16 +24,20 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for j in range(2):
             if i + j < len(cat_items):
                 category, services = cat_items[i + j]
-                row.append(InlineKeyboardButton(
-                    f"{category} ({len(services)})",
-                    callback_data=f"cat:{category}"
-                ))
+                row.append(
+                    InlineKeyboardButton(
+                        f"{category} ({len(services)})", callback_data=f"cat:{category}"
+                    )
+                )
         keyboard.append(row)
+
+    # Add Main Menu button
+    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
         "📋 <b>Select a Category:</b>\n\nChoose a service category to see available services.",
         reply_markup=reply_markup,
-        parse_mode='HTML'
+        parse_mode="HTML",
     )

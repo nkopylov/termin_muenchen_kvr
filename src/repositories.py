@@ -2,13 +2,13 @@
 Repository pattern for database access
 Provides clean separation between business logic and data access
 """
+
 from sqlmodel import Session, select, delete
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict
 from datetime import datetime
 import json
 
-from src.db_models import User, ServiceSubscription, AppointmentLog
-from src.models import UserSubscription as UserSubscriptionModel
+from src.db_models import User, ServiceSubscription, AppointmentLog, BookingSession
 
 
 class UserRepository:
@@ -27,7 +27,7 @@ class UserRepository:
         username: Optional[str] = None,
         language: str = "de",
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
     ) -> User:
         """Create new user"""
         user = User(
@@ -35,7 +35,7 @@ class UserRepository:
             username=username,
             language=language,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
         )
         self.session.add(user)
         self.session.commit()
@@ -43,10 +43,7 @@ class UserRepository:
         return user
 
     def get_or_create_user(
-        self,
-        user_id: int,
-        username: Optional[str] = None,
-        language: str = "de"
+        self, user_id: int, username: Optional[str] = None, language: str = "de"
     ) -> User:
         """Get existing user or create new one"""
         user = self.get_user(user_id)
@@ -66,10 +63,7 @@ class UserRepository:
         self.session.commit()
 
     def set_date_range(
-        self,
-        user_id: int,
-        start_date: Optional[str],
-        end_date: Optional[str]
+        self, user_id: int, start_date: Optional[str], end_date: Optional[str]
     ) -> None:
         """Set user's date range for appointments"""
         user = self.get_or_create_user(user_id)
@@ -99,17 +93,14 @@ class SubscriptionRepository:
         self.session = session
 
     def add_subscription(
-        self,
-        user_id: int,
-        service_id: int,
-        office_id: int
+        self, user_id: int, service_id: int, office_id: int
     ) -> ServiceSubscription:
         """Add a service subscription for a user"""
         # Check if already exists
         statement = select(ServiceSubscription).where(
             ServiceSubscription.user_id == user_id,
             ServiceSubscription.service_id == service_id,
-            ServiceSubscription.office_id == office_id
+            ServiceSubscription.office_id == office_id,
         )
         existing = self.session.exec(statement).first()
 
@@ -117,24 +108,18 @@ class SubscriptionRepository:
             return existing
 
         subscription = ServiceSubscription(
-            user_id=user_id,
-            service_id=service_id,
-            office_id=office_id
+            user_id=user_id, service_id=service_id, office_id=office_id
         )
         self.session.add(subscription)
         self.session.commit()
         self.session.refresh(subscription)
         return subscription
 
-    def remove_subscription(
-        self,
-        user_id: int,
-        service_id: int
-    ) -> bool:
+    def remove_subscription(self, user_id: int, service_id: int) -> bool:
         """Remove a user's subscription to a service"""
         statement = delete(ServiceSubscription).where(
             ServiceSubscription.user_id == user_id,
-            ServiceSubscription.service_id == service_id
+            ServiceSubscription.service_id == service_id,
         )
         result = self.session.exec(statement)
         self.session.commit()
@@ -151,7 +136,7 @@ class SubscriptionRepository:
             {
                 "service_id": sub.service_id,
                 "office_id": sub.office_id,
-                "subscribed_at": sub.subscribed_at.isoformat()
+                "subscribed_at": sub.subscribed_at.isoformat(),
             }
             for sub in subscriptions
         ]
@@ -176,17 +161,12 @@ class SubscriptionRepository:
 
         return grouped
 
-    def has_subscription(
-        self,
-        user_id: int,
-        service_id: int,
-        office_id: int
-    ) -> bool:
+    def has_subscription(self, user_id: int, service_id: int, office_id: int) -> bool:
         """Check if user has a specific subscription"""
         statement = select(ServiceSubscription).where(
             ServiceSubscription.user_id == user_id,
             ServiceSubscription.service_id == service_id,
-            ServiceSubscription.office_id == office_id
+            ServiceSubscription.office_id == office_id,
         )
         return self.session.exec(statement).first() is not None
 
@@ -214,16 +194,11 @@ class AppointmentLogRepository:
         self.session = session
 
     def log_appointment(
-        self,
-        service_id: int,
-        office_id: int,
-        data: Dict
+        self, service_id: int, office_id: int, data: Dict
     ) -> AppointmentLog:
         """Log appointment availability"""
         log = AppointmentLog(
-            service_id=service_id,
-            office_id=office_id,
-            data=json.dumps(data)
+            service_id=service_id, office_id=office_id, data=json.dumps(data)
         )
         self.session.add(log)
         self.session.commit()
@@ -231,17 +206,117 @@ class AppointmentLogRepository:
         return log
 
     def get_recent_logs(
-        self,
-        service_id: Optional[int] = None,
-        limit: int = 100
+        self, service_id: Optional[int] = None, limit: int = 100
     ) -> List[AppointmentLog]:
         """Get recent appointment logs"""
-        statement = select(AppointmentLog).order_by(
-            AppointmentLog.found_at.desc()
-        )
+        statement = select(AppointmentLog).order_by(AppointmentLog.found_at.desc())
 
         if service_id:
             statement = statement.where(AppointmentLog.service_id == service_id)
 
         statement = statement.limit(limit)
+        return list(self.session.exec(statement))
+
+
+class BookingSessionRepository:
+    """Repository for BookingSession operations"""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create_session(
+        self,
+        user_id: int,
+        state: str,
+        service_id: int,
+        office_id: int,
+        date: str,
+        captcha_token: str,
+        expires_at: datetime,
+    ) -> BookingSession:
+        """Create a new booking session"""
+        # Delete any existing session for this user first
+        self.delete_session(user_id)
+
+        session = BookingSession(
+            user_id=user_id,
+            state=state,
+            service_id=service_id,
+            office_id=office_id,
+            date=date,
+            captcha_token=captcha_token,
+            expires_at=expires_at,
+        )
+        self.session.add(session)
+        self.session.commit()
+        self.session.refresh(session)
+        return session
+
+    def get_session(self, user_id: int) -> Optional[BookingSession]:
+        """Get booking session for a user"""
+        return self.session.get(BookingSession, user_id)
+
+    def update_session(
+        self,
+        user_id: int,
+        state: Optional[str] = None,
+        timestamp: Optional[int] = None,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> Optional[BookingSession]:
+        """Update booking session"""
+        booking_session = self.get_session(user_id)
+        if not booking_session:
+            return None
+
+        if state is not None:
+            booking_session.state = state
+        if timestamp is not None:
+            booking_session.timestamp = timestamp
+        if name is not None:
+            booking_session.name = name
+        if email is not None:
+            booking_session.email = email
+
+        booking_session.updated_at = datetime.utcnow()
+        self.session.commit()
+        self.session.refresh(booking_session)
+        return booking_session
+
+    def delete_session(self, user_id: int) -> bool:
+        """Delete booking session"""
+        session = self.get_session(user_id)
+        if session:
+            self.session.delete(session)
+            self.session.commit()
+            return True
+        return False
+
+    def is_user_in_booking(self, user_id: int) -> bool:
+        """Check if user has an active booking session"""
+        session = self.get_session(user_id)
+        if not session:
+            return False
+
+        # Check if expired
+        if datetime.utcnow() > session.expires_at:
+            self.delete_session(user_id)
+            return False
+
+        return True
+
+    def cleanup_expired_sessions(self) -> int:
+        """Delete all expired sessions"""
+        statement = delete(BookingSession).where(
+            BookingSession.expires_at < datetime.utcnow()
+        )
+        result = self.session.exec(statement)
+        self.session.commit()
+        return result.rowcount
+
+    def get_all_active_sessions(self) -> List[BookingSession]:
+        """Get all active (non-expired) sessions"""
+        statement = select(BookingSession).where(
+            BookingSession.expires_at > datetime.utcnow()
+        )
         return list(self.session.exec(statement))

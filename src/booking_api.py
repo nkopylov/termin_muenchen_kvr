@@ -2,14 +2,18 @@
 Booking API module for Munich appointment system
 Handles the 3-step booking process: reserve -> update -> preconfirm
 """
+
 import logging
-import requests
 from typing import Dict, Any, Optional
+
+from src.munich_api_client import get_api_client
 
 logger = logging.getLogger(__name__)
 
 
-def reserve_appointment(timestamp: int, office_id: int, service_id: int, captcha_token: str) -> Optional[Dict[str, Any]]:
+def reserve_appointment(
+    timestamp: int, office_id: int, service_id: int, captcha_token: str
+) -> Optional[Dict[str, Any]]:
     """
     Step 1: Reserve an appointment slot
 
@@ -23,54 +27,30 @@ def reserve_appointment(timestamp: int, office_id: int, service_id: int, captcha
         Response dict with processId, authKey, timestamp, scope, etc.
         None if reservation failed
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/reserve-appointment/"
-
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
+    api_client = get_api_client()
 
     data = {
         "timestamp": timestamp,
         "serviceCount": [1],
         "officeId": office_id,
         "serviceId": [service_id],
-        "captchaToken": captcha_token
+        "captchaToken": captcha_token,
     }
 
-    try:
-        logger.info(f"Reserving appointment: timestamp={timestamp}, office={office_id}, service={service_id}")
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
+    logger.info(
+        f"Reserving appointment: timestamp={timestamp}, office={office_id}, service={service_id}"
+    )
+    result = api_client.post("reserve-appointment/", data)
 
-        if result.get('processId') and result.get('authKey'):
-            logger.info(f"Appointment reserved successfully: processId={result['processId']}, authKey={result['authKey']}")
-            return result
-        else:
-            logger.error(f"Reservation failed: missing processId or authKey in response: {result}")
-            return None
-
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error during reservation: {e.response.status_code}")
-        try:
-            error_data = e.response.json()
-            logger.error(f"Error details: {error_data}")
-        except:
-            logger.error(f"Response text: {e.response.text[:200]}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during reservation: {e}")
+    if result and result.get("processId") and result.get("authKey"):
+        logger.info(
+            f"Appointment reserved successfully: processId={result['processId']}, authKey={result['authKey']}"
+        )
+        return result
+    else:
+        logger.error(
+            f"Reservation failed: missing processId or authKey in response: {result}"
+        )
         return None
 
 
@@ -85,7 +65,7 @@ def update_appointment(
     scope: Dict[str, Any],
     telephone: str = "",
     custom_textfield: str = "",
-    custom_textfield2: str = ""
+    custom_textfield2: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Step 2: Update appointment with user information
@@ -106,22 +86,7 @@ def update_appointment(
     Returns:
         Updated appointment data or None if failed
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/update-appointment/"
-
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
+    api_client = get_api_client()
 
     data = {
         "processId": process_id,
@@ -132,7 +97,7 @@ def update_appointment(
         "customTextfield2": custom_textfield2,
         "email": email,
         "telephone": telephone,
-        "officeName": scope.get('provider', {}).get('name', ''),
+        "officeName": scope.get("provider", {}).get("name", ""),
         "officeId": office_id,
         "scope": scope,
         "subRequestCounts": [],
@@ -141,28 +106,18 @@ def update_appointment(
         "serviceCount": 1,
         "status": "reserved",
         "captchaToken": "",
-        "slotCount": 1
+        "slotCount": 1,
     }
 
-    try:
-        logger.info(f"Updating appointment {process_id} with user info: name={family_name}, email={email}")
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        logger.info(f"Appointment updated successfully: processId={process_id}")
-        return result
+    logger.info(
+        f"Updating appointment {process_id} with user info: name={family_name}, email={email}"
+    )
+    result = api_client.post("update-appointment/", data)
 
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error during update: {e.response.status_code}")
-        try:
-            error_data = e.response.json()
-            logger.error(f"Error details: {error_data}")
-        except:
-            logger.error(f"Response text: {e.response.text[:200]}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during update: {e}")
-        return None
+    if result:
+        logger.info(f"Appointment updated successfully: processId={process_id}")
+
+    return result
 
 
 def preconfirm_appointment(
@@ -176,7 +131,7 @@ def preconfirm_appointment(
     scope: Dict[str, Any],
     telephone: str = "",
     custom_textfield: str = "",
-    custom_textfield2: str = ""
+    custom_textfield2: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Step 3: Preconfirm appointment (final step before email confirmation)
@@ -187,22 +142,7 @@ def preconfirm_appointment(
     Returns:
         Preconfirmed appointment data or None if failed
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/preconfirm-appointment/"
-
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
+    api_client = get_api_client()
 
     data = {
         "processId": process_id,
@@ -213,7 +153,7 @@ def preconfirm_appointment(
         "customTextfield2": custom_textfield2,
         "email": email,
         "telephone": telephone,
-        "officeName": scope.get('provider', {}).get('name', ''),
+        "officeName": scope.get("provider", {}).get("name", ""),
         "officeId": office_id,
         "scope": scope,
         "subRequestCounts": [],
@@ -222,29 +162,17 @@ def preconfirm_appointment(
         "serviceCount": 1,
         "status": "preconfirmed",
         "captchaToken": "",
-        "slotCount": 1
+        "slotCount": 1,
     }
 
-    try:
-        logger.info(f"Preconfirming appointment {process_id}")
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
+    logger.info(f"Preconfirming appointment {process_id}")
+    result = api_client.post("preconfirm-appointment/", data)
+
+    if result:
         logger.info(f"Appointment preconfirmed successfully: processId={process_id}")
         logger.info(f"User must now check email {email} to confirm the appointment")
-        return result
 
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error during preconfirm: {e.response.status_code}")
-        try:
-            error_data = e.response.json()
-            logger.error(f"Error details: {error_data}")
-        except:
-            logger.error(f"Response text: {e.response.text[:200]}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during preconfirm: {e}")
-        return None
+    return result
 
 
 def book_appointment_complete(
@@ -256,7 +184,7 @@ def book_appointment_complete(
     email: str,
     telephone: str = "",
     custom_textfield: str = "",
-    custom_textfield2: str = ""
+    custom_textfield2: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Complete booking flow: reserve -> update -> preconfirm
@@ -283,15 +211,24 @@ def book_appointment_complete(
         logger.error("Booking failed at reservation step")
         return None
 
-    process_id = reservation['processId']
-    auth_key = reservation['authKey']
-    timestamp_str = reservation['timestamp']
-    scope = reservation['scope']
+    process_id = reservation["processId"]
+    auth_key = reservation["authKey"]
+    timestamp_str = reservation["timestamp"]
+    scope = reservation["scope"]
 
     # Step 2: Update with user info
     updated = update_appointment(
-        process_id, auth_key, timestamp_str, family_name, email,
-        office_id, service_id, scope, telephone, custom_textfield, custom_textfield2
+        process_id,
+        auth_key,
+        timestamp_str,
+        family_name,
+        email,
+        office_id,
+        service_id,
+        scope,
+        telephone,
+        custom_textfield,
+        custom_textfield2,
     )
     if not updated:
         logger.error("Booking failed at update step")
@@ -299,8 +236,17 @@ def book_appointment_complete(
 
     # Step 3: Preconfirm
     preconfirmed = preconfirm_appointment(
-        process_id, auth_key, timestamp_str, family_name, email,
-        office_id, service_id, scope, telephone, custom_textfield, custom_textfield2
+        process_id,
+        auth_key,
+        timestamp_str,
+        family_name,
+        email,
+        office_id,
+        service_id,
+        scope,
+        telephone,
+        custom_textfield,
+        custom_textfield2,
     )
     if not preconfirmed:
         logger.error("Booking failed at preconfirm step")

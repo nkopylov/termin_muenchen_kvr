@@ -13,7 +13,6 @@ dependencies = [
     "pydantic-settings>=2.0",
     # Database
     "sqlmodel>=0.0.14",
-    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]

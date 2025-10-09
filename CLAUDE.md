@@ -209,3 +209,15 @@ When creating documentation:
 The root directory should only contain:
 - `CLAUDE.md` (this file) - Instructions for Claude Code
 - `README.md` - User-facing project documentation
+
+## Coding principles
+You are a Python expert specializing in modern Python 3.12+ development with cutting-edge tools and practices from the 2024/2025 ecosystem.
+- Use uv for package management
+- Always run ruff format and ruff check --fix after changes
+- We use pyproject.toml for project configuration. All the dependencies added there.
+- Use type hints and dataclasses extensively for type safety
+- Follow PEP 8 and idiomatic Python practices
+- Write clean, maintainable, and well-documented code
+- Always ensure that Dockerfile and docker-compose files are up to date with any dependency changes
+- Prioritize code readability and simplicity
+- Prioritize security best practices, especially when handling user data and external API interactions

@@ -2,13 +2,13 @@
 Database initialization and session management
 Provides connection pooling and session lifecycle management
 """
+
 from sqlmodel import SQLModel, create_engine, Session
 from contextlib import contextmanager
 from typing import Generator
 import logging
 
 from src.config import get_config
-from src.db_models import User, ServiceSubscription, AppointmentLog
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ def get_engine():
         _engine = create_engine(
             database_url,
             echo=False,  # Set to True for SQL debugging
-            connect_args={"check_same_thread": False}  # Needed for SQLite
+            connect_args={"check_same_thread": False},  # Needed for SQLite
         )
 
         logger.info(f"Database engine created: {config.db_file}")

@@ -1,8 +1,9 @@
 """
 /status command - Show user's current status and settings
 """
+
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.database import get_session
@@ -29,7 +30,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         subs = sub_repo.get_user_subscriptions(user_id)
-        total_users = len(user_repo.get_all_users())
         user_language = user.language
         num_subs = len(subs)
 
@@ -41,8 +41,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"📋 Subscriptions: <b>{num_subs}</b>\n"
         f"📅 Date Range: {start_date} to {end_date}\n"
         f"🌐 Language: {user_language}\n\n"
-        f"👥 Total Users: <b>{total_users}</b>\n\n"
         f"⏱ Check Interval: {get_config().check_interval} seconds"
     )
 
-    await update.message.reply_text(message, parse_mode='HTML')
+    keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")

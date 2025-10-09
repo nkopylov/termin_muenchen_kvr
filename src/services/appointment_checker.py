@@ -2,6 +2,7 @@
 Appointment checker service - background task for monitoring appointment availability.
 Coordinates captcha token management, database queries, and user notifications.
 """
+
 import time
 import asyncio
 import logging
@@ -10,7 +11,11 @@ from telegram.ext import Application
 
 from src.config import get_config
 from src.database import get_session
-from src.repositories import SubscriptionRepository, AppointmentLogRepository
+from src.repositories import (
+    SubscriptionRepository,
+    AppointmentLogRepository,
+    BookingSessionRepository,
+)
 from src.termin_tracker import get_fresh_captcha_token, get_available_days
 from src.services_manager import get_service_info
 from src.services.notification_service import notify_users_of_appointment
@@ -19,13 +24,13 @@ logger = logging.getLogger(__name__)
 
 # Global stats tracking
 stats = {
-    'total_checks': 0,
-    'successful_checks': 0,
-    'failed_checks': 0,
-    'appointments_found_count': 0,
-    'last_check_time': None,
-    'last_success_time': None,
-    'bot_start_time': None
+    "total_checks": 0,
+    "successful_checks": 0,
+    "failed_checks": 0,
+    "appointments_found_count": 0,
+    "last_check_time": None,
+    "last_success_time": None,
+    "bot_start_time": None,
 }
 
 # Captcha token management
@@ -40,7 +45,7 @@ def get_stats() -> dict:
 
 def set_bot_start_time() -> None:
     """Set bot start time in stats"""
-    stats['bot_start_time'] = datetime.now()
+    stats["bot_start_time"] = datetime.now()
 
 
 def get_user_date_range(user_id: int) -> tuple[str | None, str | None]:
@@ -68,9 +73,9 @@ def get_user_date_range(user_id: int) -> tuple[str | None, str | None]:
 
         # Default to next 60 days if not set
         if not start_date:
-            start_date = datetime.now().strftime('%Y-%m-%d')
+            start_date = datetime.now().strftime("%Y-%m-%d")
         if not end_date:
-            end_date = (datetime.now() + timedelta(days=60)).strftime('%Y-%m-%d')
+            end_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
 
         return start_date, end_date
 
@@ -83,7 +88,7 @@ async def send_health_alert(application: Application, message: str) -> None:
             await application.bot.send_message(
                 chat_id=config.admin_telegram_id,
                 text=f"⚠️ <b>Health Alert</b>\n\n{message}",
-                parse_mode='HTML'
+                parse_mode="HTML",
             )
             logger.info(f"Sent health alert to admin {config.admin_telegram_id}")
         except Exception as e:
@@ -103,8 +108,18 @@ async def check_and_notify(application: Application) -> None:
 
     while True:
         try:
-            stats['last_check_time'] = datetime.now()
-            stats['total_checks'] += 1
+            stats["last_check_time"] = datetime.now()
+            stats["total_checks"] += 1
+
+            # Clean up expired booking sessions periodically (every 5 checks)
+            if stats["total_checks"] % 5 == 0:
+                with get_session() as session:
+                    booking_repo = BookingSessionRepository(session)
+                    expired_count = booking_repo.cleanup_expired_sessions()
+                    if expired_count > 0:
+                        logger.info(
+                            f"Cleaned up {expired_count} expired booking session(s)"
+                        )
 
             # Get all service subscriptions using repository
             with get_session() as session:
@@ -122,14 +137,14 @@ async def check_and_notify(application: Application) -> None:
                 captcha_token = get_fresh_captcha_token()
                 if not captcha_token:
                     logger.error("Failed to get captcha token")
-                    stats['failed_checks'] += 1
+                    stats["failed_checks"] += 1
                     consecutive_failures += 1
 
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                         await send_health_alert(
                             application,
                             f"Bot has failed {consecutive_failures} consecutive checks!\n"
-                            f"Last error: Failed to get captcha token"
+                            f"Last error: Failed to get captcha token",
                         )
 
                     await asyncio.sleep(config.check_interval)
@@ -139,7 +154,7 @@ async def check_and_notify(application: Application) -> None:
 
             # Check each unique service/office combination
             for service_office_key, user_ids in service_subs.items():
-                service_id, office_id = service_office_key.split('_')
+                service_id, office_id = service_office_key.split("_")
                 service_id = int(service_id)
                 office_id = int(office_id)
 
@@ -155,37 +170,53 @@ async def check_and_notify(application: Application) -> None:
 
                 # Check each unique date range for this service
                 for date_key, date_user_ids in date_ranges.items():
-                    start_date, end_date = date_key.split('_')
+                    start_date, end_date = date_key.split("_")
 
                     # Get service name for logging
                     service_info = get_service_info(service_id)
-                    service_name = service_info['name'] if service_info else f"Service {service_id}"
+                    service_name = (
+                        service_info["name"]
+                        if service_info
+                        else f"Service {service_id}"
+                    )
 
-                    logger.info(f"Checking {service_name} (ID:{service_id}, Office:{office_id}) from {start_date} to {end_date} for {len(date_user_ids)} users")
-                    data = get_available_days(start_date, end_date, captcha_token, str(office_id), str(service_id))
+                    logger.info(
+                        f"Checking {service_name} (ID:{service_id}, Office:{office_id}) from {start_date} to {end_date} for {len(date_user_ids)} users"
+                    )
+                    data = get_available_days(
+                        start_date,
+                        end_date,
+                        captcha_token,
+                        str(office_id),
+                        str(service_id),
+                    )
 
                     # Check if appointments are available
                     appointments_found = False
 
                     if isinstance(data, dict):
                         if "errorCode" in data:
-                            logger.warning(f"API error: {data['errorCode']} - {data.get('errorMessage', '')}")
-                            stats['failed_checks'] += 1
+                            logger.warning(
+                                f"API error: {data['errorCode']} - {data.get('errorMessage', '')}"
+                            )
+                            stats["failed_checks"] += 1
                             consecutive_failures += 1
                         elif data and len(data) > 0:
                             # Extract available days from response
-                            available_days = data.get('availableDays', [])
+                            available_days = data.get("availableDays", [])
                             if available_days:
                                 appointments_found = True
                     elif isinstance(data, list) and len(data) > 0:
                         appointments_found = True
 
                     if appointments_found:
-                        logger.info(f"✅ Appointments found for {service_name}! Notifying {len(date_user_ids)} users")
+                        logger.info(
+                            f"✅ Appointments found for {service_name}! Notifying {len(date_user_ids)} users"
+                        )
                         logger.info(f"📋 Full API response: {data}")
-                        stats['successful_checks'] += 1
-                        stats['last_success_time'] = datetime.now()
-                        stats['appointments_found_count'] += 1
+                        stats["successful_checks"] += 1
+                        stats["last_success_time"] = datetime.now()
+                        stats["appointments_found_count"] += 1
                         consecutive_failures = 0
 
                         # Log the appointment with repository
@@ -201,24 +232,26 @@ async def check_and_notify(application: Application) -> None:
                             office_id=office_id,
                             service_name=service_name,
                             data=data,
-                            captcha_token=captcha_token
+                            captcha_token=captcha_token,
                         )
                     else:
-                        logger.info(f"No appointments available for {service_name} ({start_date} to {end_date})")
-                        stats['successful_checks'] += 1
-                        stats['last_success_time'] = datetime.now()
+                        logger.info(
+                            f"No appointments available for {service_name} ({start_date} to {end_date})"
+                        )
+                        stats["successful_checks"] += 1
+                        stats["last_success_time"] = datetime.now()
                         consecutive_failures = 0
 
         except Exception as e:
             logger.error(f"Error in check_and_notify: {e}")
-            stats['failed_checks'] += 1
+            stats["failed_checks"] += 1
             consecutive_failures += 1
 
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 await send_health_alert(
                     application,
                     f"Bot has failed {consecutive_failures} consecutive checks!\n"
-                    f"Last error: {str(e)}"
+                    f"Last error: {str(e)}",
                 )
 
         await asyncio.sleep(config.check_interval)

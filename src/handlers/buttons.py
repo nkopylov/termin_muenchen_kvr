@@ -2,13 +2,18 @@
 Button callback handlers for Telegram inline keyboards.
 Handles all button interactions including menus, service subscription, and navigation.
 """
+
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.repositories import UserRepository, SubscriptionRepository
-from src.services_manager import categorize_services, get_service_info, get_category_for_service
+from src.services_manager import (
+    categorize_services,
+    get_service_info,
+    get_category_for_service,
+)
 from src.services.appointment_checker import get_stats, get_user_date_range
 from src.config import get_config
 
@@ -27,7 +32,9 @@ async def show_main_menu(query, user_id: int):
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(menu_text, reply_markup=reply_markup, parse_mode='HTML')
+    await query.edit_message_text(
+        menu_text, reply_markup=reply_markup, parse_mode="HTML"
+    )
 
 
 async def show_stats_inline(query):
@@ -39,8 +46,8 @@ async def show_stats_inline(query):
         total_users = len(user_repo.get_all_users())
 
     success_rate = 0
-    if stats['total_checks'] > 0:
-        success_rate = (stats['successful_checks'] / stats['total_checks']) * 100
+    if stats["total_checks"] > 0:
+        success_rate = (stats["successful_checks"] / stats["total_checks"]) * 100
 
     message = (
         "📈 <b>Bot Statistics</b>\n\n"
@@ -55,7 +62,7 @@ async def show_stats_inline(query):
     keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def show_status_inline(query, user_id: int):
@@ -66,12 +73,14 @@ async def show_status_inline(query, user_id: int):
 
         user = user_repo.get_user(user_id)
         if not user:
-            keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+            keyboard = [
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 "❌ You are not registered.\n\nUse /start to register.",
                 reply_markup=reply_markup,
-                parse_mode='HTML'
+                parse_mode="HTML",
             )
             return
 
@@ -95,7 +104,7 @@ async def show_status_inline(query, user_id: int):
     keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def show_setdates_inline(query, user_id: int):
@@ -115,7 +124,7 @@ async def show_setdates_inline(query, user_id: int):
     keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def show_category_services(query, category_name: str, page: int = 0):
@@ -124,7 +133,9 @@ async def show_category_services(query, category_name: str, page: int = 0):
     services = categories.get(category_name, [])
 
     if not services:
-        await query.edit_message_text(f"❌ No services found in {category_name} category.")
+        await query.edit_message_text(
+            f"❌ No services found in {category_name} category."
+        )
         return
 
     # Show max 10 services per page
@@ -138,22 +149,29 @@ async def show_category_services(query, category_name: str, page: int = 0):
     keyboard = []
     for service in page_services:
         # Truncate long names
-        name = service['name']
+        name = service["name"]
         if len(name) > 50:
             name = name[:47] + "..."
 
-        keyboard.append([InlineKeyboardButton(
-            name,
-            callback_data=f"srv:{service['id']}"
-        )])
+        keyboard.append(
+            [InlineKeyboardButton(name, callback_data=f"srv:{service['id']}")]
+        )
 
     # Navigation buttons
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("◀️ Previous", callback_data=f"catpage:{category_name}:{page-1}"))
+        nav_row.append(
+            InlineKeyboardButton(
+                "◀️ Previous", callback_data=f"catpage:{category_name}:{page-1}"
+            )
+        )
     nav_row.append(InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu"))
     if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton("Next ▶️", callback_data=f"catpage:{category_name}:{page+1}"))
+        nav_row.append(
+            InlineKeyboardButton(
+                "Next ▶️", callback_data=f"catpage:{category_name}:{page+1}"
+            )
+        )
     keyboard.append(nav_row)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -164,7 +182,7 @@ async def show_category_services(query, category_name: str, page: int = 0):
         await query.edit_message_text(
             f"<b>{category_name}</b>\n\n{pagination_text}",
             reply_markup=reply_markup,
-            parse_mode='HTML'
+            parse_mode="HTML",
         )
     except Exception as e:
         # Ignore "message is not modified" errors
@@ -185,7 +203,7 @@ async def show_service_details(query, service_id: int, user_id: int):
         sub_repo = SubscriptionRepository(session)
         user_subs = sub_repo.get_user_subscriptions(user_id)
 
-    is_subscribed = any(sub['service_id'] == service_id for sub in user_subs)
+    is_subscribed = any(sub["service_id"] == service_id for sub in user_subs)
 
     # Build message
     message = (
@@ -193,7 +211,7 @@ async def show_service_details(query, service_id: int, user_id: int):
         f"Service ID: <code>{service_info['id']}</code>\n"
     )
 
-    if service_info.get('maxQuantity'):
+    if service_info.get("maxQuantity"):
         message += f"Max. Quantity: {service_info['maxQuantity']}\n"
 
     message += f"\nStatus: {'✅ Subscribed' if is_subscribed else '⭕ Not subscribed'}"
@@ -201,29 +219,25 @@ async def show_service_details(query, service_id: int, user_id: int):
     # Build keyboard
     keyboard = []
     if is_subscribed:
-        keyboard.append([InlineKeyboardButton(
-            "🗑 Unsubscribe",
-            callback_data=f"unsub:{service_id}"
-        )])
+        keyboard.append(
+            [InlineKeyboardButton("🗑 Unsubscribe", callback_data=f"unsub:{service_id}")]
+        )
     else:
-        keyboard.append([InlineKeyboardButton(
-            "✅ Subscribe",
-            callback_data=f"addsub:{service_id}"
-        )])
+        keyboard.append(
+            [InlineKeyboardButton("✅ Subscribe", callback_data=f"addsub:{service_id}")]
+        )
 
     # Back button
     category = get_category_for_service(service_id)
     if category:
-        keyboard.append([InlineKeyboardButton("◀️ Back", callback_data=f"cat:{category}")])
+        keyboard.append(
+            [InlineKeyboardButton("◀️ Back", callback_data=f"cat:{category}")]
+        )
     keyboard.append([InlineKeyboardButton("🏠 Categories", callback_data="categories")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        message,
-        reply_markup=reply_markup,
-        parse_mode='HTML'
-    )
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def show_office_selection(query, service_id: int, user_id: int):
@@ -241,9 +255,9 @@ async def show_office_selection(query, service_id: int, user_id: int):
     if not offices:
         await query.edit_message_text(
             f"❌ No offices found for '{service_info['name']}'.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("◀️ Back", callback_data=f"srv:{service_id}")
-            ]])
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("◀️ Back", callback_data=f"srv:{service_id}")]]
+            ),
         )
         return
 
@@ -257,15 +271,19 @@ async def show_office_selection(query, service_id: int, user_id: int):
     # Build keyboard with office options (max 10 per page for now)
     keyboard = []
     for office in offices[:20]:  # Show first 20 offices
-        office_name = office.get('name', f"Office {office['id']}")
+        office_name = office.get("name", f"Office {office['id']}")
         # Shorten long names
         if len(office_name) > 45:
             office_name = office_name[:42] + "..."
 
-        keyboard.append([InlineKeyboardButton(
-            f"📍 {office_name}",
-            callback_data=f"selectoffice:{service_id}:{office['id']}"
-        )])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"📍 {office_name}",
+                    callback_data=f"selectoffice:{service_id}:{office['id']}",
+                )
+            ]
+        )
 
     # Add note if there are more offices
     if len(offices) > 20:
@@ -276,11 +294,7 @@ async def show_office_selection(query, service_id: int, user_id: int):
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        message,
-        reply_markup=reply_markup,
-        parse_mode='HTML'
-    )
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def show_myservices(query, user_id: int):
@@ -295,17 +309,17 @@ async def show_myservices(query, user_id: int):
         await query.edit_message_text(
             "📋 <b>No Subscriptions</b>\n\nYou haven't subscribed to any services yet.\nUse /subscribe to start monitoring appointment availability!",
             reply_markup=reply_markup,
-            parse_mode='HTML'
+            parse_mode="HTML",
         )
         return
 
     message = "📋 <b>Your Subscriptions</b>\n\nYou are monitoring these services:\n\n"
 
     for sub in subscriptions:
-        service_info = get_service_info(sub['service_id'])
+        service_info = get_service_info(sub["service_id"])
         if service_info:
             # Add office information
-            office_id = sub.get('office_id', 'Unknown')
+            office_id = sub.get("office_id", "Unknown")
             message += f"• <b>{service_info['name']}</b>\n"
             message += f"   Service ID: {sub['service_id']}\n"
             message += f"   📍 Office ID: {office_id}\n"
@@ -317,20 +331,23 @@ async def show_myservices(query, user_id: int):
     keyboard = []
     if len(subscriptions) <= 10:
         for sub in subscriptions:
-            service_info = get_service_info(sub['service_id'])
+            service_info = get_service_info(sub["service_id"])
             if service_info:
-                name = service_info['name']
+                name = service_info["name"]
                 if len(name) > 40:
                     name = name[:37] + "..."
-                keyboard.append([InlineKeyboardButton(
-                    f"🗑 {name}",
-                    callback_data=f"unsub:{sub['service_id']}"
-                )])
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            f"🗑 {name}", callback_data=f"unsub:{sub['service_id']}"
+                        )
+                    ]
+                )
 
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -340,6 +357,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     user_id = update.effective_user.id
     data = query.data
+
+    # Check for orphaned booking sessions (bot restarted during booking)
+    from src.services.queue_manager import is_user_in_queue
+
+    if is_user_in_queue(user_id) and (
+        data.startswith("time_") or data == "cancel_booking"
+    ):
+        # User has an active booking session but ConversationHandler doesn't know about it
+        from src.commands.booking import delete_booking_session
+
+        delete_booking_session(user_id)
+        await query.edit_message_text(
+            "❌ Your booking session was interrupted (bot restarted).\n\n"
+            "Please start a new booking from an appointment notification."
+        )
+        return
 
     # Handle main menu
     if data == "main_menu":
@@ -374,17 +407,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             for j in range(2):
                 if i + j < len(cat_items):
                     category, services = cat_items[i + j]
-                    row.append(InlineKeyboardButton(
-                        f"{category} ({len(services)})",
-                        callback_data=f"cat:{category}"
-                    ))
+                    row.append(
+                        InlineKeyboardButton(
+                            f"{category} ({len(services)})",
+                            callback_data=f"cat:{category}",
+                        )
+                    )
             keyboard.append(row)
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📋 <b>Select a Category:</b>",
-            reply_markup=reply_markup,
-            parse_mode='HTML'
+            "📋 <b>Select a Category:</b>", reply_markup=reply_markup, parse_mode="HTML"
         )
 
     elif data.startswith("cat:"):
@@ -417,7 +450,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         with get_session() as session:
             sub_repo = SubscriptionRepository(session)
-            success = sub_repo.add_subscription(user_id, service_id, office_id=office_id)
+            success = sub_repo.add_subscription(
+                user_id, service_id, office_id=office_id
+            )
 
         if success:
             await query.answer("✅ Subscribed!", show_alert=True)

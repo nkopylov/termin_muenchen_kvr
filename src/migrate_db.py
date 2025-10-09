@@ -3,9 +3,11 @@
 Database migration script
 Adds service_id and office_id columns to appointment_logs table
 """
+
 import sqlite3
 import sys
 from pathlib import Path
+
 
 def migrate_database(db_path: str = "bot_data.db"):
     """Apply database migrations"""
@@ -19,19 +21,21 @@ def migrate_database(db_path: str = "bot_data.db"):
 
         migrations_applied = []
 
-        if 'service_id' not in columns:
+        if "service_id" not in columns:
             print("Adding service_id column to appointment_logs...")
             cursor.execute("ALTER TABLE appointment_logs ADD COLUMN service_id INTEGER")
             migrations_applied.append("service_id")
 
-        if 'office_id' not in columns:
+        if "office_id" not in columns:
             print("Adding office_id column to appointment_logs...")
             cursor.execute("ALTER TABLE appointment_logs ADD COLUMN office_id INTEGER")
             migrations_applied.append("office_id")
 
         if migrations_applied:
             conn.commit()
-            print(f"✅ Migration complete! Added columns: {', '.join(migrations_applied)}")
+            print(
+                f"✅ Migration complete! Added columns: {', '.join(migrations_applied)}"
+            )
         else:
             print("✅ Database already up to date, no migrations needed")
 
@@ -49,6 +53,7 @@ def migrate_database(db_path: str = "bot_data.db"):
         return False
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     db_file = sys.argv[1] if len(sys.argv) > 1 else "bot_data.db"

@@ -6,7 +6,7 @@ import os
 import sys
 import time
 
-import requests
+from src.munich_api_client import get_api_client
 
 logger = logging.getLogger(__name__)
 
@@ -16,33 +16,20 @@ def get_captcha_challenge():
     Get a captcha challenge from the server.
     Returns the challenge data dict.
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/captcha-challenge/"
+    api_client = get_api_client()
+    logger.info("Requesting captcha challenge from server...")
 
-    headers = {
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
+    challenge_data = api_client.get("captcha-challenge/")
+    if challenge_data:
+        logger.info(
+            f"Captcha challenge received: maxnumber={challenge_data.get('maxnumber', 'unknown')}"
+        )
+    else:
+        logger.error("Failed to get captcha challenge")
+        print("Failed to get captcha challenge")
 
-    try:
-        logger.info("Requesting captcha challenge from server...")
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        challenge_data = response.json()
-        logger.info(f"Captcha challenge received: maxnumber={challenge_data.get('maxnumber', 'unknown')}")
-        return challenge_data
-    except Exception as e:
-        logger.error(f"Failed to get captcha challenge: {e}")
-        print(f"Failed to get captcha challenge: {e}")
-        return None
+    return challenge_data
+
 
 def solve_captcha_challenge(challenge_data):
     """
@@ -56,7 +43,9 @@ def solve_captcha_challenge(challenge_data):
     salt = challenge_data.get("salt")
     signature = challenge_data.get("signature")
 
-    logger.info(f"Solving captcha challenge (algorithm={algorithm}, max {maxnumber} iterations)...")
+    logger.info(
+        f"Solving captcha challenge (algorithm={algorithm}, max {maxnumber} iterations)..."
+    )
     print(f"Solving captcha challenge (max {maxnumber} iterations)...")
     start_time = time.time()
 
@@ -77,7 +66,7 @@ def solve_captcha_challenge(challenge_data):
                 "number": number,
                 "salt": salt,
                 "signature": signature,
-                "took": took_ms
+                "took": took_ms,
             }
 
         # Progress indicator every 100k iterations
@@ -89,54 +78,38 @@ def solve_captcha_challenge(challenge_data):
     print("Failed to solve captcha within maxnumber limit")
     return None
 
+
 def verify_captcha_solution(solution):
     """
     Submit the captcha solution to get a JWT token.
     solution: dict with the proof-of-work solution
     Returns the JWT token string.
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/captcha-verify/"
+    api_client = get_api_client()
 
     # Encode solution as base64 JSON payload
     solution_json = json.dumps(solution)
     payload = base64.b64encode(solution_json.encode()).decode()
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
-
     data = {"payload": payload}
 
-    try:
-        logger.info("Verifying captcha solution with server...")
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
+    logger.info("Verifying captcha solution with server...")
+    result = api_client.post("captcha-verify/", data)
 
-        if result.get("meta", {}).get("success") and result.get("data", {}).get("valid"):
-            token = result.get("token")
-            logger.info(f"Captcha token obtained successfully: {token[:50]}...")
-            print(f"✓ Got captcha token: {token[:50]}...")
-            return token
-        else:
-            logger.error(f"Captcha verification failed: {result}")
-            print(f"Captcha verification failed: {result}")
-            return None
-    except Exception as e:
-        logger.error(f"Captcha verification request failed: {e}")
-        print(f"Captcha verification request failed: {e}")
+    if (
+        result
+        and result.get("meta", {}).get("success")
+        and result.get("data", {}).get("valid")
+    ):
+        token = result.get("token")
+        logger.info(f"Captcha token obtained successfully: {token[:50]}...")
+        print(f"✓ Got captcha token: {token[:50]}...")
+        return token
+    else:
+        logger.error(f"Captcha verification failed: {result}")
+        print(f"Captcha verification failed: {result}")
         return None
+
 
 def get_fresh_captcha_token():
     """
@@ -165,6 +138,7 @@ def get_fresh_captcha_token():
         logger.error("Captcha flow failed: could not verify solution")
     return token
 
+
 def get_available_slots(date, office_id, service_id, captcha_token):
     """
     Get available time slots for a specific date using available-appointments-by-office endpoint.
@@ -183,54 +157,34 @@ def get_available_slots(date, office_id, service_id, captcha_token):
         ]
     }
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/available-appointments-by-office/"
+    api_client = get_api_client()
 
     params = {
         "date": date,
         "officeId": office_id,
         "serviceId": service_id,
         "serviceCount": "1",
-        "captchaToken": captcha_token
+        "captchaToken": captcha_token,
     }
 
-    headers = {
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
+    logger.debug(
+        f"Fetching slots for {date} (office={office_id}, service={service_id})"
+    )
+    data = api_client.get("available-appointments-by-office/", params=params)
 
-    try:
-        logger.debug(f"Fetching slots for {date} (office={office_id}, service={service_id})")
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-
+    if data:
         # Count total appointments across all offices
-        total_appointments = sum(len(office.get('appointments', [])) for office in data.get('offices', []))
+        total_appointments = sum(
+            len(office.get("appointments", [])) for office in data.get("offices", [])
+        )
         logger.debug(f"Successfully fetched {total_appointments} slots for {date}")
-        return data
-    except requests.exceptions.HTTPError as e:
-        logger.warning(f"HTTP {e.response.status_code} error fetching slots for {date}")
-        try:
-            error_data = e.response.json()
-            logger.warning(f"Error details: {error_data}")
-        except:
-            logger.warning(f"Response text: {e.response.text[:200]}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error fetching slots for {date}: {e}")
-        return None
+
+    return data
 
 
-def get_available_days(start_date, end_date, captcha_token, office_id="10461", service_id="10339028"):
+def get_available_days(
+    start_date, end_date, captcha_token, office_id="10461", service_id="10339028"
+):
     """
     Check available days in a date range.
     start_date: e.g. '2025-10-02'
@@ -238,7 +192,7 @@ def get_available_days(start_date, end_date, captcha_token, office_id="10461", s
     captcha_token: JWT token from the website
     Returns the available days information.
     """
-    url = "https://www48.muenchen.de/buergeransicht/api/citizen/available-days-by-office/"
+    api_client = get_api_client()
 
     params = {
         "startDate": start_date,
@@ -246,57 +200,51 @@ def get_available_days(start_date, end_date, captcha_token, office_id="10461", s
         "officeId": office_id,
         "serviceId": service_id,
         "serviceCount": "1",
-        "captchaToken": captcha_token
+        "captchaToken": captcha_token,
     }
 
-    headers = {
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Origin": "https://stadt.muenchen.de",
-        "Referer": "https://stadt.muenchen.de/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
-        "Priority": "u=3, i"
-    }
+    logger.info(
+        f"Checking available days: {start_date} to {end_date} (office={office_id}, service={service_id})"
+    )
+    data = api_client.get("available-days-by-office/", params=params)
 
-    try:
-        logger.info(f"Checking available days: {start_date} to {end_date} (office={office_id}, service={service_id})")
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+    if data:
         logger.info(f"API response received: {data}")
-        return data
-    except Exception as e:
-        logger.error(f"Request exception while checking available days: {e}")
-        print(f"Request exception: {e}")
-        return None
+    else:
+        logger.error("Request failed while checking available days")
+        print("Request failed")
+
+    return data
+
 
 def play_alert():
     """
     Play a simple alert sound (cross-platform)
     """
-    if sys.platform == 'darwin':  # macOS
-        os.system('afplay /System/Library/Sounds/Glass.aiff')
-    elif sys.platform == 'win32':  # Windows
+    if sys.platform == "darwin":  # macOS
+        os.system("afplay /System/Library/Sounds/Glass.aiff")
+    elif sys.platform == "win32":  # Windows
         try:
             import winsound
+
             winsound.Beep(1000, 500)
         except ImportError:
-            print('\a')  # Fallback to terminal bell
+            print("\a")  # Fallback to terminal bell
     else:  # Linux and others
-        print('\a')  # Terminal bell
+        print("\a")  # Terminal bell
 
-def check_available_days(start_date, end_date, captcha_token, office_id="10461", service_id="10339028"):
+
+def check_available_days(
+    start_date, end_date, captcha_token, office_id="10461", service_id="10339028"
+):
     """
     Checks available days in the date range.
     If any days are available, triggers an alert.
     """
     print(f"Checking available days from {start_date} to {end_date}...")
-    data = get_available_days(start_date, end_date, captcha_token, office_id, service_id)
+    data = get_available_days(
+        start_date, end_date, captcha_token, office_id, service_id
+    )
 
     print("Returned data:", data)
 
@@ -318,12 +266,13 @@ def check_available_days(start_date, end_date, captcha_token, office_id="10461",
     print("No available days found")
     return False
 
+
 def main_loop():
     # Configure your search parameters here
     start_date = "2025-10-02"  # Start of date range
-    end_date = "2026-04-02"    # End of date range
-    office_id = "10461"        # Office ID
-    service_id = "10339028"    # Service ID
+    end_date = "2026-04-02"  # End of date range
+    office_id = "10461"  # Office ID
+    service_id = "10339028"  # Service ID
 
     # Get a fresh captcha token (solves the proof-of-work automatically)
     print("Getting fresh captcha token...")
@@ -334,7 +283,9 @@ def main_loop():
         return
 
     # Token is valid for 5 minutes, track when it expires
-    token_expires_at = time.time() + 280  # 280 seconds = ~4.5 minutes (buffer before 5min expiry)
+    token_expires_at = (
+        time.time() + 280
+    )  # 280 seconds = ~4.5 minutes (buffer before 5min expiry)
 
     while True:
         # Refresh token if it's about to expire
@@ -346,12 +297,15 @@ def main_loop():
                 return
             token_expires_at = time.time() + 280
 
-        if check_available_days(start_date, end_date, captcha_token, office_id, service_id):
+        if check_available_days(
+            start_date, end_date, captcha_token, office_id, service_id
+        ):
             print("Available days found! Stopping monitor.")
             break
         else:
             print("No available days. Checking again in 2 minutes...\n")
         time.sleep(120)
+
 
 if __name__ == "__main__":
     main_loop()

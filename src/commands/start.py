@@ -1,6 +1,7 @@
 """
 /start command - Register new users and show welcome message
 """
+
 import logging
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -30,7 +31,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 username=username,
                 language="en",
                 start_date=today.strftime("%Y-%m-%d"),
-                end_date=end_date.strftime("%Y-%m-%d")
+                end_date=end_date.strftime("%Y-%m-%d"),
             )
 
     # Show welcome message
@@ -49,7 +50,5 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        welcome_msg,
-        reply_markup=reply_markup,
-        parse_mode='HTML'
+        welcome_msg, reply_markup=reply_markup, parse_mode="HTML"
     )

@@ -1,6 +1,7 @@
 """
 /menu command - Show main menu with action buttons
 """
+
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -22,8 +23,7 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not user:
             # Not registered, redirect to /start
             await update.message.reply_text(
-                "👋 Welcome! Please use /start to register first.",
-                parse_mode='HTML'
+                "👋 Welcome! Please use /start to register first.", parse_mode="HTML"
             )
             return
 
@@ -39,4 +39,6 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode='HTML')
+    await update.message.reply_text(
+        menu_text, reply_markup=reply_markup, parse_mode="HTML"
+    )
