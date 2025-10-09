@@ -52,7 +52,6 @@ python3 telegram_bot.py
 │   ├── config.py               # Pydantic Settings
 │   ├── database.py             # Session management
 │   ├── db_models.py            # SQLModel ORM models
-│   ├── models.py               # Type-safe dataclasses
 │   ├── repositories.py         # Repository pattern for DB access
 │   ├── booking_api.py          # Booking API integration
 │   ├── termin_tracker.py       # Munich API client (CAPTCHA, availability)
@@ -79,7 +78,6 @@ python3 telegram_bot.py
    - Includes helper functions for showing menus, service lists, etc.
 
 4. **Core Infrastructure** (`src/`)
-   - Type-safe models and dataclasses
    - Pydantic configuration with validation
    - SQLModel ORM with repository pattern
    - Session management with context managers
@@ -120,15 +118,6 @@ if is_user_in_queue(user_id):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     # Command logic here
-```
-
-**Type Safety** - Use dataclasses for structured data:
-```python
-@dataclass
-class ServiceInfo:
-    id: int
-    name: str
-    max_quantity: int = 1
 ```
 
 **Configuration** - Centralized with Pydantic:

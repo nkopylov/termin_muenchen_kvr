@@ -50,7 +50,6 @@ CATEGORY_KEYWORDS = {
 
 # Cache for services
 _services_cache = None
-_offices_cache = None
 _full_payload_cache = None
 
 
@@ -65,20 +64,6 @@ def fetch_services() -> Optional[List[Dict]]:
         return services
     else:
         logger.error("Failed to fetch services")
-        return None
-
-
-def fetch_offices() -> Optional[List[Dict]]:
-    """Fetch all available offices from API"""
-    api_client = get_api_client()
-    data = api_client.get("offices")
-
-    if data:
-        offices = data.get("offices", [])
-        logger.info(f"Fetched {len(offices)} offices from API")
-        return offices
-    else:
-        logger.error("Failed to fetch offices")
         return None
 
 
@@ -107,14 +92,6 @@ def get_services() -> List[Dict]:
     if _services_cache is None:
         _services_cache = fetch_services()
     return _services_cache or []
-
-
-def get_offices() -> List[Dict]:
-    """Get offices (cached)"""
-    global _offices_cache
-    if _offices_cache is None:
-        _offices_cache = fetch_offices()
-    return _offices_cache or []
 
 
 def get_full_payload() -> Dict:
@@ -173,15 +150,6 @@ def get_service_info(service_id: int) -> Optional[Dict]:
     return None
 
 
-def get_office_info(office_id: int) -> Optional[Dict]:
-    """Get detailed information for a specific office"""
-    offices = get_offices()
-    for office in offices:
-        if office["id"] == office_id:
-            return office
-    return None
-
-
 def get_category_for_service(service_id: int) -> Optional[str]:
     """Find which category a service belongs to"""
     categories = categorize_services()
@@ -218,62 +186,3 @@ def get_offices_for_service(service_id: int) -> List[Dict]:
         f"Service {service_id} has {len(offices)} designated office(s) from relations array"
     )
     return offices
-
-
-def get_default_office_for_service(service_id: int) -> Optional[int]:
-    """
-    Get the default/preferred office ID for a service.
-    Prioritizes Ausländerbehörde office 10461 (Notfalltermine) for residence permit services.
-    Returns None if no suitable office is found.
-    """
-    offices = get_offices_for_service(service_id)
-    if not offices:
-        logger.warning(f"No offices found for service {service_id}")
-        return None
-
-    # Priority list for Ausländerbehörde services
-    priority_offices = [10461, 10187259, 10446, 10454, 10455]
-
-    # Check if this is an Ausländerbehörde service
-    service_info = get_service_info(service_id)
-    if service_info:
-        service_name = service_info.get("name", "").lower()
-        is_foreigners_office = any(
-            keyword in service_name
-            for keyword in ["aufenthalt", "notfall", "duldung", "visum", "ausländer"]
-        )
-
-        if is_foreigners_office:
-            # Try to find priority offices
-            for priority_id in priority_offices:
-                for office in offices:
-                    if office["id"] == priority_id:
-                        logger.info(
-                            f"Selected priority office {priority_id} for service {service_id}"
-                        )
-                        return priority_id
-
-    # Default: return first office with valid scope
-    for office in offices:
-        if office.get("scope") and office["scope"].get("id", 0) > 0:
-            office_id = office["id"]
-            logger.info(f"Selected default office {office_id} for service {service_id}")
-            return office_id
-
-    # Fallback: return first office
-    office_id = offices[0]["id"]
-    logger.info(f"Selected fallback office {office_id} for service {service_id}")
-    return office_id
-
-
-# Refresh cache on module load
-def refresh_cache():
-    """Force refresh of cached data"""
-    global _services_cache, _offices_cache, _full_payload_cache
-    _services_cache = None
-    _offices_cache = None
-    _full_payload_cache = None
-    get_services()
-    get_offices()
-    get_full_payload()
-    logger.info("Service cache refreshed")

@@ -130,7 +130,6 @@ class TestBookingStateTransitions:
     def test_state_progression_order(self):
         """Test the expected order of booking states"""
         from src.commands.booking import (
-            SELECTING_DATE,
             SELECTING_TIME,
             ASKING_NAME,
             ASKING_EMAIL,
@@ -138,11 +137,11 @@ class TestBookingStateTransitions:
         )
 
         # Verify state constants are in correct order
-        assert SELECTING_DATE == 0
-        assert SELECTING_TIME == 1
-        assert ASKING_NAME == 2
-        assert ASKING_EMAIL == 3
-        assert CONFIRMING == 4
+        # Note: Booking starts at SELECTING_TIME (no SELECTING_DATE state)
+        assert SELECTING_TIME == 0
+        assert ASKING_NAME == 1
+        assert ASKING_EMAIL == 2
+        assert CONFIRMING == 3
 
     @pytest.mark.asyncio
     @patch("src.commands.booking.get_booking_session")

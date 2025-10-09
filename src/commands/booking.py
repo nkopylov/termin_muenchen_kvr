@@ -5,6 +5,7 @@ Manages the multi-step booking process with user interaction
 
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
@@ -26,12 +27,11 @@ BOOKING_SESSION_TIMEOUT_SECONDS = 900
 
 # Conversation states
 (
-    SELECTING_DATE,
     SELECTING_TIME,
     ASKING_NAME,
     ASKING_EMAIL,
     CONFIRMING,
-) = range(5)
+) = range(4)
 
 
 def create_booking_session(
@@ -148,7 +148,7 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         # Create inline keyboard with time slots
         keyboard = []
         for timestamp in appointments[:10]:  # Show first 10 slots
-            dt = datetime.fromtimestamp(timestamp)
+            dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
             time_str = dt.strftime("%H:%M")
             keyboard.append(
                 [
@@ -205,7 +205,7 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # Update session with selected timestamp
     update_booking_session(user_id, timestamp=timestamp, state="ASKING_NAME")
 
-    dt = datetime.fromtimestamp(timestamp)
+    dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
     time_str = dt.strftime("%H:%M on %Y-%m-%d")
 
     keyboard = [
@@ -274,7 +274,7 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("❌ Session expired. Please start again.")
         return ConversationHandler.END
 
-    dt = datetime.fromtimestamp(booking_session.timestamp)
+    dt = datetime.fromtimestamp(booking_session.timestamp, tz=ZoneInfo("Europe/Berlin"))
     time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
 
     keyboard = [
@@ -341,7 +341,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if result:
             process_id = result.get("processId")
-            dt = datetime.fromtimestamp(timestamp)
+            dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
             time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
 
             keyboard = [

@@ -9,16 +9,12 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Base URLs
+# Base URL
 BASE_API_URL = "https://www48.muenchen.de/buergeransicht/api/citizen"
-BASE_REFERRER = "https://stadt.muenchen.de/"
 
 # Minimal required headers that work for all Munich API endpoints
 DEFAULT_HEADERS = {
     "Accept": "application/json",
-    "Origin": "https://stadt.muenchen.de",
-    "Referer": "https://stadt.muenchen.de/",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Safari/605.1.15",
 }
 
 
@@ -117,18 +113,6 @@ class MunichAPIClient:
         except Exception as e:
             logger.error(f"Unexpected error for POST {endpoint}: {e}")
             return None
-
-    def get_full_url(self, path: str) -> str:
-        """
-        Get full URL for an API endpoint.
-
-        Args:
-            path: Endpoint path
-
-        Returns:
-            Full URL
-        """
-        return f"{self.base_url}/{path}"
 
 
 # Singleton instance for convenience

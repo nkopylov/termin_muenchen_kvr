@@ -67,29 +67,6 @@ class TestUserRepository:
         assert user2.user_id == 12345
         assert user2.username == "original"  # Original username preserved
 
-    def test_get_user_language(self, db_session):
-        """Test retrieving user's language preference"""
-        repo = UserRepository(db_session)
-        repo.create_user(user_id=12345, language="ru")
-
-        language = repo.get_user_language(12345)
-        assert language == "ru"
-
-    def test_get_user_language_default(self, db_session):
-        """Test default language for non-existent user"""
-        repo = UserRepository(db_session)
-        language = repo.get_user_language(99999)
-        assert language == "de"
-
-    def test_set_user_language(self, db_session):
-        """Test updating user's language preference"""
-        repo = UserRepository(db_session)
-        repo.create_user(user_id=12345, language="de")
-
-        repo.set_user_language(12345, "en")
-        user = repo.get_user(12345)
-        assert user.language == "en"
-
     def test_set_date_range(self, db_session):
         """Test setting user's date range filter"""
         repo = UserRepository(db_session)

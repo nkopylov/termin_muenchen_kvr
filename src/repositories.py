@@ -51,17 +51,6 @@ class UserRepository:
             user = self.create_user(user_id, username, language)
         return user
 
-    def get_user_language(self, user_id: int) -> str:
-        """Get user's preferred language"""
-        user = self.get_user(user_id)
-        return user.language if user else "de"
-
-    def set_user_language(self, user_id: int, language: str) -> None:
-        """Set user's language preference"""
-        user = self.get_or_create_user(user_id)
-        user.language = language
-        self.session.commit()
-
     def set_date_range(
         self, user_id: int, start_date: Optional[str], end_date: Optional[str]
     ) -> None:

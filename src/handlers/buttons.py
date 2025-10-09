@@ -3,7 +3,6 @@ Button callback handlers for Telegram inline keyboards.
 Handles all button interactions including menus, service subscription, and navigation.
 """
 
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -16,8 +15,6 @@ from src.services_manager import (
 )
 from src.services.appointment_checker import get_stats, get_user_date_range
 from src.config import get_config
-
-logger = logging.getLogger(__name__)
 
 
 async def show_main_menu(query, user_id: int):

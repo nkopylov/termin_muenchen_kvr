@@ -32,12 +32,11 @@ class BotConfig(BaseSettings):
     db_file: str = Field("bot_data.db", description="SQLite database file path")
 
     # Munich appointment system settings
-    office_id: str = Field("10461", description="Default Munich office ID")
     check_interval: int = Field(
-        15,
+        120,
         ge=5,
         le=600,
-        description="Interval in seconds between appointment checks (default: 15)",
+        description="Interval in seconds between appointment checks (default: 120)",
     )
 
     @field_validator("telegram_bot_token")
@@ -54,27 +53,9 @@ class BotConfig(BaseSettings):
             )
         return v
 
-    @field_validator("check_interval")
-    @classmethod
-    def validate_check_interval(cls, v: int) -> int:
-        """Ensure check interval is reasonable"""
-        if v < 5:
-            raise ValueError("check_interval must be at least 5 seconds")
-        if v > 600:
-            raise ValueError("check_interval must be at most 600 seconds (10 minutes)")
-        return v
-
-    @property
-    def booking_url(self) -> str:
-        """Generate booking URL for a service"""
-        return "https://stadt.muenchen.de/buergerservice/terminvereinbarung.html"
-
-    def get_booking_url_for_service(
-        self, service_id: int, office_id: Optional[int] = None
-    ) -> str:
+    def get_booking_url_for_service(self, service_id: int, office_id: int) -> str:
         """Generate booking URL for a specific service and office"""
-        office = office_id or self.office_id
-        return f"https://stadt.muenchen.de/buergerservice/terminvereinbarung.html#/services/{service_id}/locations/{office}"
+        return f"https://stadt.muenchen.de/buergerservice/terminvereinbarung.html#/services/{service_id}/locations/{office_id}"
 
 
 # Singleton instance
@@ -94,11 +75,4 @@ def get_config() -> BotConfig:
     global _config
     if _config is None:
         _config = BotConfig()
-    return _config
-
-
-def reload_config() -> BotConfig:
-    """Force reload configuration from environment"""
-    global _config
-    _config = BotConfig()
     return _config
