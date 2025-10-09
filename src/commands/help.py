@@ -66,6 +66,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "✅ Book immediately when you receive a notification\n"
         "✅ Check your email and confirm within 24 hours\n"
         "✅ Use /status regularly to monitor bot activity\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>🐛 FEEDBACK & BUG REPORTS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Found a bug or have a suggestion?\n"
+        "Report it on GitHub: https://github.com/nkopylov/termin_muenchen_kvr\n\n"
+        "We appreciate your feedback! 💙\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
     )
 
