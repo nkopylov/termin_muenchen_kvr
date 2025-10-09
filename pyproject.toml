@@ -1,22 +1,19 @@
 [project]
 name = "notfall-termin-abh-muenchen-bot"
 version = "2.0.0"
-description = "Munich appointment booking notification bot with AI-powered service matching"
+description = "Munich appointment booking notification bot"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31.0",
     "python-telegram-bot>=21.0",
     "python-dotenv>=1.0.0",
-    # Phase 1: Configuration & Validation
+    # Configuration & Validation
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    # Phase 2: Database
+    # Database
     "sqlmodel>=0.0.14",
     "alembic>=1.13.0",
-    # Phase 3: i18n
-    "babel>=2.14.0",
-    "python-i18n>=0.3.9",
 ]
 
 [project.optional-dependencies]

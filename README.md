@@ -5,9 +5,9 @@ Telegram bot that monitors Munich city appointment system and notifies users whe
 ## Features
 
 - **Multi-service subscriptions** - Track multiple appointment types simultaneously
-- **AI-powered search** - Natural language service matching with `/ask` command
-- **Multi-language** - Support for German, English, and Russian
+- **Automated booking** - Book appointments directly through the bot
 - **Date range filtering** - Only get notified for appointments in your preferred timeframe
+- **Real-time notifications** - Get instant alerts when appointments become available
 
 ## Quick Start
 
@@ -32,26 +32,25 @@ Required:
 - `TELEGRAM_BOT_TOKEN` - Get from @BotFather
 
 Optional:
-- `OPENAI_API_KEY` - For AI-powered `/ask` command
 - `ADMIN_TELEGRAM_ID` - For health alerts
 
 ## Bot Commands
 
-- `/start` - Register and select language
+- `/start` - Register and get started
+- `/menu` - Show main menu
 - `/subscribe` - Browse and subscribe to services
-- `/ask <query>` - AI-powered natural language search
 - `/myservices` - Manage your subscriptions
 - `/setdates <start> <end>` - Set date range (YYYY-MM-DD)
-- `/language` - Change language
 - `/status` - View your settings
+- `/stats` - View bot statistics
 - `/stop` - Unsubscribe from all
 
 ## Architecture
 
 Built with modern Python patterns:
-- **Type-safe** - Pydantic models and enums throughout
+- **Type-safe** - Pydantic models and dataclasses throughout
 - **ORM** - SQLModel with repository pattern
-- **i18n** - Babel/gettext for translations
 - **Validated config** - Fails fast on startup errors
+- **Background monitoring** - Continuous appointment checking with health monitoring
 
 See `CLAUDE.md` for detailed architecture documentation.

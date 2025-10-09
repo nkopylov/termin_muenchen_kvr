@@ -7,8 +7,8 @@ from typing import List, Optional, Dict, Tuple
 from datetime import datetime
 import json
 
-from db_models import User, ServiceSubscription, AppointmentLog
-from models import UserSubscription as UserSubscriptionModel
+from src.db_models import User, ServiceSubscription, AppointmentLog
+from src.models import UserSubscription as UserSubscriptionModel
 
 
 class UserRepository:

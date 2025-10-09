@@ -13,8 +13,8 @@ from telegram.ext import (
     filters
 )
 
-from booking_api import book_appointment_complete
-from termin_tracker import get_available_slots
+from src.booking_api import book_appointment_complete
+from src.termin_tracker import get_available_slots
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,11 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     query = update.callback_query
     await query.answer()
 
+    # Mark user as in booking mode
+    user_id = update.effective_user.id
+    from src.services.queue_manager import add_user_to_queue
+    add_user_to_queue(user_id)
+
     # Extract data from callback (format: "book_DATE_OFFICEID_SERVICEID")
     callback_data = query.data.split('_')
     if len(callback_data) >= 4:
@@ -56,6 +61,10 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         # Fetch available time slots for this date
         captcha_token = context.bot_data.get('captcha_token')
         if not captcha_token:
+            # Remove user from active booking mode
+            from src.services.queue_manager import remove_user_from_queue
+            remove_user_from_queue(user_id)
+            logger.info(f"User {user_id} exited booking mode (token expired) - notifications resumed")
             await query.edit_message_text(
                 "❌ Error: Captcha token expired. Please try again from the appointment notification."
             )
@@ -64,6 +73,10 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         slots_data = get_available_slots(date, office_id, service_id, captcha_token)
 
         if not slots_data or not slots_data.get('offices'):
+            # Remove user from active booking mode
+            from src.services.queue_manager import remove_user_from_queue
+            remove_user_from_queue(user_id)
+            logger.info(f"User {user_id} exited booking mode (no slots) - notifications resumed")
             await query.edit_message_text(
                 f"❌ No available time slots found for {date}.\n"
                 f"They may have been booked already. Please try another date."
@@ -78,6 +91,10 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 break
 
         if not appointments:
+            # Remove user from active booking mode
+            from src.services.queue_manager import remove_user_from_queue
+            remove_user_from_queue(user_id)
+            logger.info(f"User {user_id} exited booking mode (no appointments) - notifications resumed")
             await query.edit_message_text(
                 f"❌ No time slots available for {date}."
             )
@@ -107,6 +124,11 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return SELECTING_TIME
 
     else:
+        # Remove user from active booking mode
+        from telegram_bot import active_booking_users
+        if user_id in active_booking_users:
+            del active_booking_users[user_id]
+            logger.info(f"User {user_id} exited booking mode (invalid data) - notifications resumed")
         await query.edit_message_text("❌ Invalid booking data. Please try again.")
         return ConversationHandler.END
 
@@ -118,7 +140,14 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     query = update.callback_query
     await query.answer()
 
+    user_id = update.effective_user.id
+
     if query.data == "cancel_booking":
+        # Remove user from active booking mode
+        from telegram_bot import active_booking_users
+        if user_id in active_booking_users:
+            del active_booking_users[user_id]
+            logger.info(f"User {user_id} exited booking mode (cancelled at time selection) - notifications resumed")
         await query.edit_message_text("❌ Booking cancelled.")
         return ConversationHandler.END
 
@@ -206,7 +235,14 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
 
+    user_id = update.effective_user.id
+
     if query.data == "cancel_booking":
+        # Remove user from active booking mode
+        from telegram_bot import active_booking_users
+        if user_id in active_booking_users:
+            del active_booking_users[user_id]
+            logger.info(f"User {user_id} exited booking mode (cancelled) - notifications resumed")
         await query.edit_message_text("❌ Booking cancelled.")
         return ConversationHandler.END
 
@@ -278,6 +314,11 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"Please try again or contact support."
         )
 
+    # Remove user from active booking mode
+    from src.services.queue_manager import remove_user_from_queue
+    remove_user_from_queue(user_id)
+    logger.info(f"User {user_id} exited booking mode - notifications resumed")
+
     # Clear user data
     context.user_data.clear()
 
@@ -286,6 +327,13 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def cancel_booking_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the booking conversation"""
+    user_id = update.effective_user.id
+
+    # Remove user from active booking mode
+    from src.services.queue_manager import remove_user_from_queue
+    remove_user_from_queue(user_id)
+    logger.info(f"User {user_id} exited booking mode (command cancel) - notifications resumed")
+
     await update.message.reply_text("❌ Booking cancelled.")
     context.user_data.clear()
     return ConversationHandler.END

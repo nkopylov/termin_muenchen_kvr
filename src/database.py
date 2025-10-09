@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from typing import Generator
 import logging
 
-from config import get_config
-from db_models import User, ServiceSubscription, AppointmentLog
+from src.config import get_config
+from src.db_models import User, ServiceSubscription, AppointmentLog
 
 logger = logging.getLogger(__name__)
 

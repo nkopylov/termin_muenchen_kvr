@@ -11,12 +11,9 @@ COPY pyproject.toml ./
 # Install dependencies using uv
 RUN uv pip install --system --no-cache -r pyproject.toml
 
-# Copy all Python files
-COPY *.py ./
-
-# Copy locale files and data
-COPY locales ./locales
-COPY services_catalog.json ./
+# Copy application code
+COPY telegram_bot.py ./
+COPY src/ ./src/
 
 # Create volume mount point for database
 VOLUME ["/app/data"]

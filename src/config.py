@@ -31,20 +31,6 @@ class BotConfig(BaseSettings):
         description="Admin user ID for alerts and health checks"
     )
 
-    # OpenAI API settings (optional - fallback to keyword matching if not set)
-    openai_api_key: Optional[str] = Field(
-        None,
-        description="OpenAI API key for AI-powered features"
-    )
-    openai_model: str = Field(
-        "gpt-4o-mini",
-        description="OpenAI model to use"
-    )
-    openai_api_url: str = Field(
-        "https://api.openai.com/v1/chat/completions",
-        description="OpenAI API endpoint URL"
-    )
-
     # Database settings
     db_file: str = Field(
         "bot_data.db",
@@ -86,11 +72,6 @@ class BotConfig(BaseSettings):
         if v > 600:
             raise ValueError("check_interval must be at most 600 seconds (10 minutes)")
         return v
-
-    @property
-    def has_openai(self) -> bool:
-        """Check if OpenAI API is configured"""
-        return self.openai_api_key is not None and self.openai_api_key != ""
 
     @property
     def booking_url(self) -> str:
