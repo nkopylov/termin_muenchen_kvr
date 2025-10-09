@@ -344,7 +344,9 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             dt = datetime.fromtimestamp(timestamp)
             time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
 
-            keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+            keyboard = [
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await query.edit_message_text(
@@ -363,7 +365,9 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode="HTML",
             )
         else:
-            keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+            keyboard = [
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await query.edit_message_text(

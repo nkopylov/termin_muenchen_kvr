@@ -59,4 +59,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")
+    await update.message.reply_text(
+        message, reply_markup=reply_markup, parse_mode="HTML"
+    )

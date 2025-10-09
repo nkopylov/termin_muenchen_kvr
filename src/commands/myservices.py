@@ -25,7 +25,11 @@ async def myservices_command(
 
     if not subscriptions:
         keyboard = [
-            [InlineKeyboardButton("📋 Subscribe to Services", callback_data="main_menu")],
+            [
+                InlineKeyboardButton(
+                    "📋 Subscribe to Services", callback_data="main_menu"
+                )
+            ],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -73,4 +77,6 @@ async def myservices_command(
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")
+    await update.message.reply_text(
+        message, reply_markup=reply_markup, parse_mode="HTML"
+    )
