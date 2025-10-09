@@ -12,6 +12,7 @@ from src.services_manager import (
     categorize_services,
     get_service_info,
     get_category_for_service,
+    get_office_name,
 )
 from src.services.appointment_checker import get_stats, get_user_date_range
 from src.config import get_config
@@ -22,7 +23,11 @@ async def show_main_menu(query, user_id: int):
     menu_text = "🏠 <b>Main Menu</b>\n\nChoose an action:"
 
     keyboard = [
-        [InlineKeyboardButton("📋 Subscribe to Services", callback_data="categories")],
+        [
+            InlineKeyboardButton(
+                "📋 Subscribe to available Termins", callback_data="categories"
+            )
+        ],
         [InlineKeyboardButton("📊 My Subscriptions", callback_data="myservices")],
         [InlineKeyboardButton("📅 Set Date Range", callback_data="setdates")],
         [InlineKeyboardButton("ℹ️ Subscription Status", callback_data="status")],
@@ -64,9 +69,13 @@ async def show_stats_inline(query):
 
 async def show_status_inline(query, user_id: int):
     """Show user's status inline"""
+    from src.repositories import AppointmentLogRepository
+    from datetime import datetime
+
     with get_session() as session:
         user_repo = UserRepository(session)
         sub_repo = SubscriptionRepository(session)
+        log_repo = AppointmentLogRepository(session)
 
         user = user_repo.get_user(user_id)
         if not user:
@@ -86,7 +95,64 @@ async def show_status_inline(query, user_id: int):
         user_language = user.language
         num_subs = len(subs)
 
+        # Get user-specific appointment stats
+        user_sub_service_ids = [sub["service_id"] for sub in subs]
+        all_logs = log_repo.get_all_logs()
+        user_appointments = [
+            log for log in all_logs if log["service_id"] in user_sub_service_ids
+        ]
+
     start_date, end_date = get_user_date_range(user_id)
+
+    # Get global stats for timing info
+    stats = get_stats()
+    last_check = stats.get("last_check_time")
+    check_interval = get_config().check_interval
+
+    # Calculate time since last check
+    if last_check:
+        time_since_check = (datetime.now() - last_check).total_seconds()
+        if time_since_check < 60:
+            last_check_str = f"{int(time_since_check)} seconds ago"
+        elif time_since_check < 3600:
+            last_check_str = f"{int(time_since_check / 60)} minutes ago"
+        else:
+            last_check_str = f"{int(time_since_check / 3600)} hours ago"
+
+        # Calculate next check estimate
+        next_check_seconds = max(0, check_interval - time_since_check)
+        if next_check_seconds < 60:
+            next_check_str = f"~{int(next_check_seconds)} seconds"
+        else:
+            next_check_str = f"~{int(next_check_seconds / 60)} minutes"
+    else:
+        last_check_str = "Never"
+        next_check_str = "Soon"
+
+    # User-specific appointment stats
+    user_appointments_count = len(user_appointments)
+    if user_appointments and user_appointments_count > 0:
+        latest_appointment = user_appointments[0]
+        latest_time = latest_appointment.get("found_at", "")
+        if latest_time:
+            try:
+                latest_dt = datetime.fromisoformat(latest_time)
+                days_ago = (datetime.now() - latest_dt).days
+                if days_ago == 0:
+                    latest_str = "today"
+                elif days_ago == 1:
+                    latest_str = "yesterday"
+                else:
+                    latest_str = f"{days_ago} days ago"
+            except (ValueError, TypeError):
+                latest_str = "recently"
+        else:
+            latest_str = "recently"
+        stats_line = (
+            f"\n🎯 Appointments found: {user_appointments_count} (last: {latest_str})"
+        )
+    else:
+        stats_line = "\n🎯 Appointments found: 0"
 
     message = (
         "📊 <b>Your Status</b>\n\n"
@@ -94,8 +160,11 @@ async def show_status_inline(query, user_id: int):
         f"📋 Subscriptions: <b>{num_subs}</b>\n"
         f"📅 Date Range: {start_date} to {end_date}\n"
         f"🌐 Language: {user_language}\n\n"
-        f"👥 Total Users: <b>{total_users}</b>\n\n"
-        f"⏱ Check Interval: {get_config().check_interval} seconds"
+        f"🔍 Last checked: {last_check_str}\n"
+        f"⏱ Next check in: {next_check_str}\n"
+        f"⚙️ Check interval: {check_interval} seconds"
+        f"{stats_line}\n\n"
+        f"👥 Total Users: <b>{total_users}</b>"
     )
 
     keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
@@ -106,19 +175,61 @@ async def show_status_inline(query, user_id: int):
 
 async def show_setdates_inline(query, user_id: int):
     """Show instructions for setting date range"""
+    from datetime import datetime, timedelta
+
     start_date, end_date = get_user_date_range(user_id)
+
+    # Calculate preset dates
+    today = datetime.now()
+    date_2 = (today + timedelta(days=2)).strftime("%Y-%m-%d")
+    date_7 = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+    date_30 = (today + timedelta(days=30)).strftime("%Y-%m-%d")
+    date_90 = (today + timedelta(days=90)).strftime("%Y-%m-%d")
+    date_180 = (today + timedelta(days=180)).strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
 
     message = (
         "📅 <b>Set Date Range</b>\n\n"
         f"Current range: <b>{start_date}</b> to <b>{end_date}</b>\n\n"
-        "To change your date range, use the command:\n"
+        "Choose a preset or use a custom range:\n\n"
+        "<b>Custom Range:</b>\n"
         "<code>/setdates YYYY-MM-DD YYYY-MM-DD</code>\n\n"
-        "<b>Example:</b>\n"
-        "<code>/setdates 2025-10-01 2025-10-31</code>\n\n"
-        "This sets the date range for appointment searches."
+        "<b>Example:</b> <code>/setdates 2025-10-01 2025-10-31</code>"
     )
 
-    keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"📅 Next 2 days ({today_str} to {date_2})",
+                callback_data="setdates:2",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"📅 Next week ({today_str} to {date_7})",
+                callback_data="setdates:7",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"📅 Next 30 days ({today_str} to {date_30})",
+                callback_data="setdates:30",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"📅 Next 3 months ({today_str} to {date_90})",
+                callback_data="setdates:90",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"📅 Next 6 months ({today_str} to {date_180})",
+                callback_data="setdates:180",
+            )
+        ],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
@@ -316,10 +427,10 @@ async def show_myservices(query, user_id: int):
         service_info = get_service_info(sub["service_id"])
         if service_info:
             # Add office information
-            office_id = sub.get("office_id", "Unknown")
+            office_id = sub.get("office_id")
+            office_name = get_office_name(office_id) if office_id else "Unknown Office"
             message += f"• <b>{service_info['name']}</b>\n"
-            message += f"   Service ID: {sub['service_id']}\n"
-            message += f"   📍 Office ID: {office_id}\n"
+            message += f"   📍 {office_name}\n"
             message += f"   📅 Subscribed: {sub['subscribed_at'][:10]}\n\n"
 
     message += f"<b>Total:</b> {len(subscriptions)} subscription(s)"
@@ -341,6 +452,10 @@ async def show_myservices(query, user_id: int):
                     ]
                 )
 
+    if len(subscriptions) > 0:
+        keyboard.append(
+            [InlineKeyboardButton("🗑 Unsubscribe from All", callback_data="unsub_all")]
+        )
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -391,6 +506,26 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if data == "setdates":
         await show_setdates_inline(query, user_id)
+        return
+
+    if data.startswith("setdates:"):
+        # Handle preset date ranges
+        from datetime import datetime, timedelta
+
+        days = int(data.split(":")[1])
+        today = datetime.now()
+        end_date = today + timedelta(days=days)
+
+        start_date_str = today.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+
+        # Update user's date range
+        with get_session() as session:
+            user_repo = UserRepository(session)
+            user_repo.set_date_range(user_id, start_date_str, end_date_str)
+
+        await query.answer(f"✅ Date range set: next {days} days", show_alert=True)
+        await show_status_inline(query, user_id)
         return
 
     if data == "categories":
@@ -452,8 +587,34 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
         if success:
-            await query.answer("✅ Subscribed!", show_alert=True)
-            await show_service_details(query, service_id, user_id)
+            # Get user's date range for the success message
+            start_date, end_date = get_user_date_range(user_id)
+            service_info = get_service_info(service_id)
+            office_name = get_office_name(office_id)
+
+            # Build success message with date range
+            success_msg = (
+                f"🎉 <b>Subscription Successful!</b>\n\n"
+                f"<b>{service_info['name']}</b>\n"
+                f"📍 Office: {office_name}\n\n"
+                f"📅 You will receive notifications when appointments become available "
+                f"between <b>{start_date}</b> and <b>{end_date}</b>.\n\n"
+                f"💡 Tip: Use /setdates to change your date range anytime!"
+            )
+
+            # Show the detailed success message
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "📊 My Subscriptions", callback_data="myservices"
+                    )
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                success_msg, reply_markup=reply_markup, parse_mode="HTML"
+            )
         else:
             await query.answer("❌ Subscription failed", show_alert=True)
 
@@ -467,3 +628,31 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         await query.answer("🗑 Unsubscribed", show_alert=True)
         await show_service_details(query, service_id, user_id)
+
+    elif data == "unsub_all":
+        # Confirm unsubscribe all
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "✅ Yes, Remove All", callback_data="unsub_all_confirm"
+                ),
+                InlineKeyboardButton("❌ Cancel", callback_data="myservices"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "⚠️ <b>Unsubscribe from All Services?</b>\n\n"
+            "This will remove ALL your subscriptions. You can always subscribe again later.\n\n"
+            "Are you sure?",
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+
+    elif data == "unsub_all_confirm":
+        # Remove all subscriptions
+        with get_session() as session:
+            sub_repo = SubscriptionRepository(session)
+            count = sub_repo.delete_all_user_subscriptions(user_id)
+
+        await query.answer(f"🗑 Removed {count} subscription(s)", show_alert=True)
+        await show_myservices(query, user_id)

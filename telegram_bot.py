@@ -19,6 +19,7 @@ from src.commands.myservices import myservices_command
 from src.commands.setdates import setdates_command
 from src.commands.status import status_command
 from src.commands.stats import stats_command
+from src.commands.help import help_command
 from src.commands.booking import booking_conversation
 
 # Import handlers
@@ -42,11 +43,11 @@ async def post_init(application: Application) -> None:
     commands = [
         BotCommand("start", "Start the bot and register"),
         BotCommand("menu", "Show main menu"),
-        BotCommand("subscribe", "Subscribe to services"),
+        BotCommand("subscribe", "Subscribe to available Termins"),
         BotCommand("myservices", "View your subscriptions"),
         BotCommand("setdates", "Set date range filter"),
         BotCommand("status", "Show your status"),
-        BotCommand("stats", "Show bot statistics"),
+        BotCommand("help", "Show help and documentation"),
         BotCommand("stop", "Unsubscribe and delete data"),
     ]
     await application.bot.set_my_commands(commands)
@@ -82,6 +83,7 @@ def main() -> None:
     application.add_handler(CommandHandler("setdates", setdates_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("help", help_command))
 
     # Register booking conversation handler
     application.add_handler(booking_conversation)

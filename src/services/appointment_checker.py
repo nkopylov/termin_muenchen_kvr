@@ -133,8 +133,8 @@ async def check_and_notify(application: Application) -> None:
 
             # Refresh token if needed
             if time.time() >= token_expires_at:
-                logger.info("Getting fresh captcha token...")
-                captcha_token = get_fresh_captcha_token()
+                logger.info("Getting fresh captcha token (in thread pool)...")
+                captcha_token = await get_fresh_captcha_token()
                 if not captcha_token:
                     logger.error("Failed to get captcha token")
                     stats["failed_checks"] += 1
@@ -150,7 +150,7 @@ async def check_and_notify(application: Application) -> None:
                     await asyncio.sleep(config.check_interval)
                     continue
                 token_expires_at = time.time() + 280  # ~4.5 minutes
-                logger.info("Got fresh token")
+                logger.info("Got fresh token (solved in background thread)")
 
             # Check each unique service/office combination
             for service_office_key, user_ids in service_subs.items():

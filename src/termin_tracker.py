@@ -3,10 +3,17 @@ import hashlib
 import json
 import logging
 import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from src.munich_api_client import get_api_client
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for CPU-intensive CAPTCHA solving
+_captcha_executor = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="captcha-solver"
+)
 
 
 def get_captcha_challenge():
@@ -24,7 +31,6 @@ def get_captcha_challenge():
         )
     else:
         logger.error("Failed to get captcha challenge")
-        print("Failed to get captcha challenge")
 
     return challenge_data
 
@@ -44,7 +50,6 @@ def solve_captcha_challenge(challenge_data):
     logger.info(
         f"Solving captcha challenge (algorithm={algorithm}, max {maxnumber} iterations)..."
     )
-    print(f"Solving captcha challenge (max {maxnumber} iterations)...")
     start_time = time.time()
 
     for number in range(maxnumber):
@@ -57,7 +62,6 @@ def solve_captcha_challenge(challenge_data):
         if hash_result == challenge:
             took_ms = int((time.time() - start_time) * 1000)
             logger.info(f"Captcha solved! Found number: {number} in {took_ms}ms")
-            print(f"✓ Captcha solved! Found number: {number} (took {took_ms}ms)")
             return {
                 "algorithm": algorithm,
                 "challenge": challenge,
@@ -70,10 +74,8 @@ def solve_captcha_challenge(challenge_data):
         # Progress indicator every 100k iterations
         if number > 0 and number % 100000 == 0:
             logger.debug(f"Captcha solving progress: {number:,} iterations")
-            print(f"  Tried {number:,} numbers...")
 
     logger.error("Failed to solve captcha within maxnumber limit")
-    print("Failed to solve captcha within maxnumber limit")
     return None
 
 
@@ -101,35 +103,43 @@ def verify_captcha_solution(solution):
     ):
         token = result.get("token")
         logger.info(f"Captcha token obtained successfully: {token[:50]}...")
-        print(f"✓ Got captcha token: {token[:50]}...")
         return token
     else:
         logger.error(f"Captcha verification failed: {result}")
-        print(f"Captcha verification failed: {result}")
         return None
 
 
-def get_fresh_captcha_token():
+async def get_fresh_captcha_token():
     """
     Complete captcha flow: get challenge, solve it, verify solution, get token.
+    Runs CPU-intensive CAPTCHA solving in a thread pool to avoid blocking the event loop.
     Returns the JWT token string.
     """
-    logger.info("Starting captcha token acquisition flow...")
+    logger.info("Starting captcha token acquisition flow (async)...")
 
-    # Step 1: Get challenge
-    challenge = get_captcha_challenge()
+    # Step 1: Get challenge (I/O bound, quick)
+    loop = asyncio.get_event_loop()
+    challenge = await loop.run_in_executor(_captcha_executor, get_captcha_challenge)
+
     if not challenge:
         logger.error("Captcha flow failed: could not get challenge")
         return None
 
-    # Step 2: Solve the challenge
-    solution = solve_captcha_challenge(challenge)
+    # Step 2: Solve the challenge (CPU-intensive, run in thread)
+    logger.info("Solving captcha in background thread...")
+    solution = await loop.run_in_executor(
+        _captcha_executor, solve_captcha_challenge, challenge
+    )
+
     if not solution:
         logger.error("Captcha flow failed: could not solve challenge")
         return None
 
-    # Step 3: Verify solution and get token
-    token = verify_captcha_solution(solution)
+    # Step 3: Verify solution and get token (I/O bound, quick)
+    token = await loop.run_in_executor(
+        _captcha_executor, verify_captcha_solution, solution
+    )
+
     if token:
         logger.info("Captcha token acquisition flow completed successfully")
     else:
@@ -210,6 +220,5 @@ def get_available_days(
         logger.info(f"API response received: {data}")
     else:
         logger.error("Request failed while checking available days")
-        print("Request failed")
 
     return data

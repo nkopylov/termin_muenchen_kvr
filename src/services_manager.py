@@ -186,3 +186,14 @@ def get_offices_for_service(service_id: int) -> List[Dict]:
         f"Service {service_id} has {len(offices)} designated office(s) from relations array"
     )
     return offices
+
+
+def get_office_name(office_id: int) -> str:
+    """
+    Get office name by ID. Returns 'Office {id}' if not found.
+    """
+    payload = get_full_payload()
+    for office in payload.get("offices", []):
+        if office["id"] == office_id:
+            return office.get("name", f"Office {office_id}")
+    return f"Office {office_id}"

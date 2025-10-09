@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.repositories import SubscriptionRepository
-from src.services_manager import get_service_info
+from src.services_manager import get_service_info, get_office_name
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ async def myservices_command(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "📋 Subscribe to Services", callback_data="main_menu"
+                    "📋 Subscribe to available Termins", callback_data="main_menu"
                 )
             ],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
@@ -45,10 +45,10 @@ async def myservices_command(
     for sub in subscriptions:
         service_info = get_service_info(sub["service_id"])
         if service_info:
-            office_id = sub.get("office_id", "Unknown")
+            office_id = sub.get("office_id")
+            office_name = get_office_name(office_id) if office_id else "Unknown Office"
             message += f"• <b>{service_info['name']}</b>\n"
-            message += f"   Service ID: {sub['service_id']}\n"
-            message += f"   📍 Office ID: {office_id}\n"
+            message += f"   📍 {office_name}\n"
             message += f"   📅 Subscribed: {sub['subscribed_at'][:10]}\n\n"
 
     message += f"<b>Total:</b> {len(subscriptions)} subscription(s)"
@@ -74,6 +74,10 @@ async def myservices_command(
     keyboard.append(
         [InlineKeyboardButton("📋 Subscribe to More", callback_data="subscribe")]
     )
+    if len(subscriptions) > 0:
+        keyboard.append(
+            [InlineKeyboardButton("🗑 Unsubscribe from All", callback_data="unsub_all")]
+        )
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)

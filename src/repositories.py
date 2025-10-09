@@ -206,6 +206,24 @@ class AppointmentLogRepository:
         statement = statement.limit(limit)
         return list(self.session.exec(statement))
 
+    def get_all_logs(self, limit: int = 1000) -> List[Dict]:
+        """Get all appointment logs as dictionaries"""
+        statement = (
+            select(AppointmentLog).order_by(AppointmentLog.found_at.desc()).limit(limit)
+        )
+        logs = self.session.exec(statement).all()
+
+        return [
+            {
+                "id": log.id,
+                "service_id": log.service_id,
+                "office_id": log.office_id,
+                "found_at": log.found_at.isoformat(),
+                "data": log.data,
+            }
+            for log in logs
+        ]
+
 
 class BookingSessionRepository:
     """Repository for BookingSession operations"""

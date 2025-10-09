@@ -32,7 +32,11 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # Build keyboard with main actions
     keyboard = [
-        [InlineKeyboardButton("📋 Subscribe to Services", callback_data="categories")],
+        [
+            InlineKeyboardButton(
+                "📋 Subscribe to available Termins", callback_data="categories"
+            )
+        ],
         [InlineKeyboardButton("📊 My Subscriptions", callback_data="myservices")],
         [InlineKeyboardButton("📅 Set Date Range", callback_data="setdates")],
         [InlineKeyboardButton("ℹ️ Subscription Status", callback_data="status")],

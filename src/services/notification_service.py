@@ -42,7 +42,7 @@ def format_available_appointments(data) -> str:
             # Show remaining days count
             remaining = len(available_days) - len(slots_by_date)
             if remaining > 0:
-                result += f"... und {remaining} weitere Tage\n"
+                result += f"... and {remaining} more days\n"
 
         return result.strip()
 
@@ -54,7 +54,7 @@ def format_available_appointments(data) -> str:
                 date = day.get("time", "Unknown date")
                 result += f"📅 {date}\n"
             if len(available_days) > 5:
-                result += f"... und {len(available_days) - 5} weitere Tage\n"
+                result += f"... and {len(available_days) - 5} more days\n"
         return result.strip()
 
     # Legacy format handling
@@ -111,14 +111,14 @@ async def notify_users_of_appointment(
     # STEP 1: Send immediate notification with dates only
     initial_dates = "\n".join([f"📅 {day.get('time')}" for day in available_days[:5]])
     if len(available_days) > 5:
-        initial_dates += f"\n... und {len(available_days) - 5} weitere Tage"
+        initial_dates += f"\n... and {len(available_days) - 5} more days"
 
     initial_message = (
-        "🎉 <b>TERMIN VERFÜGBAR!</b> 🎉\n\n"
+        "🎉 <b>APPOINTMENT AVAILABLE!</b> 🎉\n\n"
         f"<b>{service_name}</b>\n\n"
-        f"Verfügbare Termine:\n{initial_dates}\n\n"
-        f"🔗 <a href='{booking_url}'>Jetzt Termin buchen!</a>\n\n"
-        "⏳ Zeiten werden geladen..."
+        f"Available appointments:\n{initial_dates}\n\n"
+        f"🔗 <a href='{booking_url}'>Book appointment now!</a>\n\n"
+        "⏳ Loading time slots..."
     )
 
     # Send initial messages and store message IDs for updating
@@ -186,16 +186,18 @@ async def notify_users_of_appointment(
     # STEP 3: Update all messages with final time slot information
     appointments_detail = format_available_appointments(data)
 
-    final_message = "🎉 <b>TERMIN VERFÜGBAR!</b> 🎉\n\n" f"<b>{service_name}</b>\n\n"
+    final_message = (
+        "🎉 <b>APPOINTMENT AVAILABLE!</b> 🎉\n\n" f"<b>{service_name}</b>\n\n"
+    )
 
     if appointments_detail:
-        final_message += f"Verfügbare Termine:\n{appointments_detail}\n\n"
+        final_message += f"Available appointments:\n{appointments_detail}\n\n"
     else:
-        final_message += f"Verfügbare Termine:\n{initial_dates}\n\n"
+        final_message += f"Available appointments:\n{initial_dates}\n\n"
 
     final_message += (
-        f"🔗 <a href='{booking_url}'>Jetzt Termin buchen!</a>\n\n"
-        "⚡ Schnell handeln - Termine werden schnell vergeben!"
+        f"🔗 <a href='{booking_url}'>Book appointment now!</a>\n\n"
+        "⚡ Act fast - Appointments fill up quickly!"
     )
 
     # Create inline keyboard with booking buttons for each available date
@@ -206,7 +208,7 @@ async def notify_users_of_appointment(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        f"📅 Buchen: {date}",
+                        f"📅 Book: {date}",
                         callback_data=f"book_{date}_{office_id}_{service_id}",
                     )
                 ]
@@ -214,7 +216,7 @@ async def notify_users_of_appointment(
 
     # Add link to manual booking
     keyboard.append(
-        [InlineKeyboardButton("🔗 Manuell auf Website buchen", url=booking_url)]
+        [InlineKeyboardButton("🔗 Book manually on website", url=booking_url)]
     )
 
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None

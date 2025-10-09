@@ -229,7 +229,16 @@ async def name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user_id = update.effective_user.id
     name = update.message.text.strip()
 
-    if len(name) < 2:
+    # Validate name has at least 2 words (first + last name)
+    name_parts = name.split()
+    if len(name_parts) < 2:
+        await update.message.reply_text(
+            "❌ Please enter your full name (first and last name).\n\n"
+            "Example: John Smith"
+        )
+        return ASKING_NAME
+
+    if len(name) < 4:
         await update.message.reply_text(
             "❌ Name is too short. Please enter your full name:"
         )
@@ -256,12 +265,17 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """
     Received user's email - show confirmation and process booking
     """
-    user_id = update.effective_user.id
-    email = update.message.text.strip()
+    import re
 
-    if "@" not in email or "." not in email:
+    user_id = update.effective_user.id
+    email = update.message.text.strip().lower()
+
+    # Proper email validation using regex
+    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    if not re.match(email_pattern, email):
         await update.message.reply_text(
-            "❌ Invalid email address. Please enter a valid email:"
+            "❌ Invalid email address. Please enter a valid email:\n\n"
+            "Example: your.name@example.com"
         )
         return ASKING_EMAIL
 
