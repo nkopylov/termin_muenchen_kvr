@@ -80,7 +80,25 @@ def get_booking_session(user_id: int):
     """Get booking session data"""
     with get_session() as session:
         booking_repo = BookingSessionRepository(session)
-        return booking_repo.get_session(user_id)
+        booking_session = booking_repo.get_session(user_id)
+        if booking_session:
+            # Eagerly load all attributes while session is active
+            _ = (
+                booking_session.state,
+                booking_session.service_id,
+                booking_session.office_id,
+                booking_session.date,
+                booking_session.captcha_token,
+                booking_session.timestamp,
+                booking_session.name,
+                booking_session.email,
+                booking_session.created_at,
+                booking_session.updated_at,
+                booking_session.expires_at,
+            )
+            # Detach from session to prevent DetachedInstanceError
+            session.expunge(booking_session)
+        return booking_session
 
 
 async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
