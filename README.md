@@ -2,6 +2,8 @@
 
 Telegram bot that monitors Munich city appointment system and notifies users when appointments become available.
 
+![screenshot](DOCS/bot-screenshot.png)
+
 ## Features
 
 - **Multi-service subscriptions** - Track multiple appointment types simultaneously
