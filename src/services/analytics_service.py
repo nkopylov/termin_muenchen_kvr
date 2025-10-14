@@ -57,6 +57,7 @@ class AnalyticsService:
 
         try:
             payload = {
+                "type": "event",
                 "payload": {
                     "website": self.website_id,
                     "url": f"/event/{event_name}",  # Virtual URL for event
