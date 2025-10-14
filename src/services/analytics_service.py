@@ -60,6 +60,7 @@ class AnalyticsService:
                 "type": "event",
                 "payload": {
                     "website": self.website_id,
+                    "hostname": "bot.alpenware.org",  # Virtual hostname for the bot
                     "url": f"/event/{event_name}",  # Virtual URL for event
                     "name": event_name,
                     "data": properties or {},
@@ -77,7 +78,10 @@ class AnalyticsService:
             response = await self.client.post(
                 f"{self.umami_url}/api/send",
                 json=payload,
-                headers={"Content-Type": "application/json"}
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "Munich-Appointment-Bot/2.0"
+                }
             )
 
             if response.status_code != 200:
@@ -85,7 +89,8 @@ class AnalyticsService:
                     f"Umami tracking failed: {response.status_code} - {response.text}"
                 )
             else:
-                logger.debug(f"Tracked event: {event_name}")
+                logger.info(f"✅ Tracked event: {event_name} (user_id: {user_id}, props: {properties})")
+                logger.debug(f"Response: {response.text}")
 
         except httpx.TimeoutException:
             logger.warning(f"Analytics timeout for event: {event_name}")
