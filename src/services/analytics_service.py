@@ -57,14 +57,18 @@ class AnalyticsService:
 
         try:
             payload = {
-                "type": "event",
                 "payload": {
-                    "website": self.website_id,
                     "hostname": "bot.alpenware.org",  # Virtual hostname for the bot
+                    "screen": "1920x1080",  # Required by Umami
+                    "language": "en-US",  # Required by Umami
                     "url": f"/event/{event_name}",  # Virtual URL for event
+                    "referrer": "",  # Required by Umami
+                    "title": event_name,  # Page title
+                    "website": self.website_id,
                     "name": event_name,
                     "data": properties or {},
-                }
+                },
+                "type": "event"
             }
 
             # Add user_id as visitor identifier if provided
