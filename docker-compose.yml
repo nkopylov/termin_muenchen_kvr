@@ -11,6 +11,8 @@ services:
       - ./data:/app/data
     environment:
       - DB_FILE=/app/data/bot_data.db
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"  # Exclude from Watchtower monitoring
     logging:
       driver: "json-file"
       options:
