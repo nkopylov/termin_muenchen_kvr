@@ -58,7 +58,7 @@ class AnalyticsService:
         try:
             payload = {
                 "payload": {
-                    "hostname": "bot.alpenware.org",  # Virtual hostname for the bot
+                    "hostname": "termin-bot.alpenware.org",  # Must match Umami domain config
                     "screen": "1920x1080",  # Required by Umami
                     "language": "en-US",  # Required by Umami
                     "url": f"/event/{event_name}",  # Virtual URL for event
@@ -79,12 +79,13 @@ class AnalyticsService:
             payload["payload"]["data"]["timestamp"] = datetime.utcnow().isoformat()
 
             # Send async (don't block bot operations)
+            # Note: Umami filters bot User-Agents, so we use a browser UA
             response = await self.client.post(
                 f"{self.umami_url}/api/send",
                 json=payload,
                 headers={
                     "Content-Type": "application/json",
-                    "User-Agent": "Munich-Appointment-Bot/2.0"
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
                 }
             )
 
