@@ -19,6 +19,7 @@ from src.repositories import (
 from src.termin_tracker import get_fresh_captcha_token, get_available_days
 from src.services_manager import get_service_info
 from src.services.notification_service import notify_users_of_appointment
+from src.services.analytics_service import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,12 @@ async def check_and_notify(application: Application) -> None:
     MAX_CONSECUTIVE_FAILURES = 5
 
     while True:
+        batch_start_time = time.time()
+        batch_checks = 0
+        batch_successful = 0
+        batch_failed = 0
+        batch_appointments_found = 0
+
         try:
             stats["last_check_time"] = datetime.now()
             stats["total_checks"] += 1
@@ -134,11 +141,22 @@ async def check_and_notify(application: Application) -> None:
             # Refresh token if needed
             if time.time() >= token_expires_at:
                 logger.info("Getting fresh captcha token (in thread pool)...")
+                captcha_start_time = time.time()
                 captcha_token = await get_fresh_captcha_token()
+                captcha_duration_ms = int((time.time() - captcha_start_time) * 1000)
+
                 if not captcha_token:
                     logger.error("Failed to get captcha token")
                     stats["failed_checks"] += 1
                     consecutive_failures += 1
+
+                    # Track captcha solve failure
+                    await track_event(
+                        "captcha_solved",
+                        success=False,
+                        duration_ms=captcha_duration_ms,
+                        consecutive_failures=consecutive_failures
+                    )
 
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                         await send_health_alert(
@@ -147,8 +165,24 @@ async def check_and_notify(application: Application) -> None:
                             f"Last error: Failed to get captcha token",
                         )
 
+                        # Track health alert
+                        await track_event(
+                            "health_alert",
+                            alert_type="consecutive_failures",
+                            consecutive_failures=consecutive_failures
+                        )
+
                     await asyncio.sleep(config.check_interval)
                     continue
+
+                # Track captcha solve success
+                await track_event(
+                    "captcha_solved",
+                    success=True,
+                    duration_ms=captcha_duration_ms,
+                    consecutive_failures=0
+                )
+
                 token_expires_at = time.time() + 280  # ~4.5 minutes
                 logger.info("Got fresh token (solved in background thread)")
 
@@ -171,6 +205,7 @@ async def check_and_notify(application: Application) -> None:
                 # Check each unique date range for this service
                 for date_key, date_user_ids in date_ranges.items():
                     start_date, end_date = date_key.split("_")
+                    batch_checks += 1
 
                     # Get service name for logging
                     service_info = get_service_info(service_id)
@@ -196,11 +231,21 @@ async def check_and_notify(application: Application) -> None:
 
                     if isinstance(data, dict):
                         if "errorCode" in data:
+                            error_msg = data.get('errorMessage', '')
                             logger.warning(
-                                f"API error: {data['errorCode']} - {data.get('errorMessage', '')}"
+                                f"API error: {data['errorCode']} - {error_msg}"
                             )
                             stats["failed_checks"] += 1
+                            batch_failed += 1
                             consecutive_failures += 1
+
+                            # Track API error
+                            await track_event(
+                                "api_error",
+                                endpoint="get_available_days",
+                                error_type="api_error_code",
+                                error_message=f"{data['errorCode']}: {error_msg}"
+                            )
                         elif data and len(data) > 0:
                             # Extract available days from response
                             available_days = data.get("availableDays", [])
@@ -217,7 +262,26 @@ async def check_and_notify(application: Application) -> None:
                         stats["successful_checks"] += 1
                         stats["last_success_time"] = datetime.now()
                         stats["appointments_found_count"] += 1
+                        batch_successful += 1
+                        batch_appointments_found += 1
                         consecutive_failures = 0
+
+                        # Count slots
+                        slots_count = 0
+                        if isinstance(data, dict):
+                            slots_count = len(data.get("availableDays", []))
+                        elif isinstance(data, list):
+                            slots_count = len(data)
+
+                        # Track appointment found
+                        await track_event(
+                            "appointment_found",
+                            service_id=service_id,
+                            service_name=service_name,
+                            office_id=office_id,
+                            slots_count=slots_count,
+                            matched_users=len(date_user_ids)
+                        )
 
                         # Log the appointment with repository
                         with get_session() as session:
@@ -240,12 +304,22 @@ async def check_and_notify(application: Application) -> None:
                         )
                         stats["successful_checks"] += 1
                         stats["last_success_time"] = datetime.now()
+                        batch_successful += 1
                         consecutive_failures = 0
 
         except Exception as e:
             logger.error(f"Error in check_and_notify: {e}")
             stats["failed_checks"] += 1
+            batch_failed += 1
             consecutive_failures += 1
+
+            # Track exception as API error
+            await track_event(
+                "api_error",
+                endpoint="check_and_notify",
+                error_type="exception",
+                error_message=str(e)
+            )
 
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 await send_health_alert(
@@ -253,5 +327,23 @@ async def check_and_notify(application: Application) -> None:
                     f"Bot has failed {consecutive_failures} consecutive checks!\n"
                     f"Last error: {str(e)}",
                 )
+
+                # Track health alert
+                await track_event(
+                    "health_alert",
+                    alert_type="high_error_rate",
+                    consecutive_failures=consecutive_failures
+                )
+
+        # Track batch completion
+        batch_duration_ms = int((time.time() - batch_start_time) * 1000)
+        await track_event(
+            "appointment_check_batch",
+            total_checks=batch_checks,
+            successful_checks=batch_successful,
+            failed_checks=batch_failed,
+            appointments_found=batch_appointments_found,
+            duration_ms=batch_duration_ms
+        )
 
         await asyncio.sleep(config.check_interval)

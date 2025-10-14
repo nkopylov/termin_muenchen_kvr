@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.repositories import UserRepository
+from src.services.analytics_service import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,15 @@ async def setdates_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     with get_session() as session:
         user_repo = UserRepository(session)
         user_repo.set_date_range(user_id, start_date, end_date)
+
+    # Track date range change
+    range_days = (end_dt - start_dt).days
+    await track_event(
+        "date_range_set",
+        user_id=user_id,
+        range_days=range_days,
+        range_direction="set"
+    )
 
     await update.message.reply_text(
         f"✅ Date range updated!\n\n"

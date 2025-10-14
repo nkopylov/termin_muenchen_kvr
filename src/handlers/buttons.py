@@ -16,6 +16,7 @@ from src.services_manager import (
 )
 from src.services.appointment_checker import get_stats, get_user_date_range
 from src.config import get_config
+from src.services.analytics_service import track_event
 
 
 async def show_main_menu(query, user_id: int):
@@ -524,6 +525,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             user_repo = UserRepository(session)
             user_repo.set_date_range(user_id, start_date_str, end_date_str)
 
+        # Track date range change
+        await track_event(
+            "date_range_set",
+            user_id=user_id,
+            range_days=days,
+            range_direction="set"
+        )
+
         await query.answer(f"✅ Date range set: next {days} days", show_alert=True)
         await show_status_inline(query, user_id)
         return
@@ -592,6 +601,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             service_info = get_service_info(service_id)
             office_name = get_office_name(office_id)
 
+            # Track subscription added
+            await track_event(
+                "subscription_added",
+                user_id=user_id,
+                service_id=service_id,
+                service_name=service_info["name"] if service_info else f"Service {service_id}",
+                office_id=office_id
+            )
+
             # Build success message with date range
             success_msg = (
                 f"🎉 <b>Subscription Successful!</b>\n\n"
@@ -624,7 +642,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         with get_session() as session:
             sub_repo = SubscriptionRepository(session)
+            # Get subscription info before removal for analytics
+            user_subs = sub_repo.get_user_subscriptions(user_id)
+            sub_to_remove = next((s for s in user_subs if s["service_id"] == service_id), None)
+
             sub_repo.remove_subscription(user_id, service_id)
+
+        # Track subscription removed
+        if sub_to_remove:
+            service_info = get_service_info(service_id)
+            await track_event(
+                "subscription_removed",
+                user_id=user_id,
+                service_id=service_id,
+                service_name=service_info["name"] if service_info else f"Service {service_id}",
+                office_id=sub_to_remove.get("office_id", 0),
+                reason="user_initiated"
+            )
 
         await query.answer("🗑 Unsubscribed", show_alert=True)
         await show_service_details(query, service_id, user_id)
@@ -652,7 +686,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Remove all subscriptions
         with get_session() as session:
             sub_repo = SubscriptionRepository(session)
+            # Get subscriptions before deletion for analytics
+            user_subs = sub_repo.get_user_subscriptions(user_id)
             count = sub_repo.delete_all_user_subscriptions(user_id)
+
+        # Track each removed subscription
+        for sub in user_subs:
+            service_info = get_service_info(sub["service_id"])
+            await track_event(
+                "subscription_removed",
+                user_id=user_id,
+                service_id=sub["service_id"],
+                service_name=service_info["name"] if service_info else f"Service {sub['service_id']}",
+                office_id=sub.get("office_id", 0),
+                reason="user_initiated"
+            )
 
         await query.answer(f"🗑 Removed {count} subscription(s)", show_alert=True)
         await show_myservices(query, user_id)

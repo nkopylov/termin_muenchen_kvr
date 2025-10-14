@@ -39,6 +39,17 @@ class BotConfig(BaseSettings):
         description="Interval in seconds between appointment checks (default: 120)",
     )
 
+    # Analytics settings
+    analytics_enabled: bool = Field(
+        True, description="Enable/disable analytics tracking"
+    )
+    umami_endpoint: str = Field(
+        "http://localhost:3000", description="Umami API endpoint"
+    )
+    umami_website_id: str = Field(
+        ..., description="Umami Website ID (UUID)"
+    )
+
     @field_validator("telegram_bot_token")
     @classmethod
     def validate_telegram_token(cls, v: str) -> str:

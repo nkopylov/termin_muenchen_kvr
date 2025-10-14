@@ -19,6 +19,8 @@ from src.booking_api import book_appointment_complete
 from src.termin_tracker import get_available_slots
 from src.database import get_session
 from src.repositories import BookingSessionRepository
+from src.services.analytics_service import track_event
+from src.services_manager import get_service_info
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +165,17 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             state="SELECTING_TIME",
         )
 
+        # Track booking started
+        service_info = get_service_info(service_id)
+        await track_event(
+            "booking_started",
+            user_id=user_id,
+            service_id=service_id,
+            service_name=service_info["name"] if service_info else f"Service {service_id}",
+            office_id=office_id,
+            selected_date=date
+        )
+
         # Create inline keyboard with time slots
         keyboard = []
         for timestamp in appointments[:10]:  # Show first 10 slots
@@ -204,6 +217,16 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user_id = update.effective_user.id
 
     if query.data == "cancel_booking":
+        booking_session = get_booking_session(user_id)
+        if booking_session:
+            # Track booking cancelled
+            await track_event(
+                "booking_cancelled",
+                user_id=user_id,
+                service_id=booking_session.service_id,
+                cancelled_at_step="time_selection",
+                reason="user_initiated"
+            )
         delete_booking_session(user_id)
         await query.edit_message_text("❌ Booking cancelled.")
         return ConversationHandler.END
@@ -223,7 +246,15 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # Update session with selected timestamp
     update_booking_session(user_id, timestamp=timestamp, state="ASKING_NAME")
 
+    # Track slot selected
     dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
+    await track_event(
+        "slot_selected",
+        user_id=user_id,
+        service_id=booking_session.service_id,
+        selected_time=dt.strftime("%H:%M")
+    )
+
     time_str = dt.strftime("%H:%M on %Y-%m-%d")
 
     keyboard = [
@@ -264,6 +295,16 @@ async def name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     # Update session with name
     update_booking_session(user_id, name=name, state="ASKING_EMAIL")
+
+    # Track name entered (without tracking the actual name for privacy)
+    booking_session = get_booking_session(user_id)
+    if booking_session:
+        await track_event(
+            "name_entered",
+            user_id=user_id,
+            service_id=booking_session.service_id,
+            step_number=2
+        )
 
     keyboard = [
         [InlineKeyboardButton("❌ Cancel Booking", callback_data="cancel_booking")]
@@ -306,6 +347,14 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("❌ Session expired. Please start again.")
         return ConversationHandler.END
 
+    # Track email entered (without tracking the actual email for privacy)
+    await track_event(
+        "email_entered",
+        user_id=user_id,
+        service_id=booking_session.service_id,
+        step_number=3
+    )
+
     dt = datetime.fromtimestamp(booking_session.timestamp, tz=ZoneInfo("Europe/Berlin"))
     time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
 
@@ -339,6 +388,16 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
 
     if query.data == "cancel_booking":
+        booking_session = get_booking_session(user_id)
+        if booking_session:
+            # Track booking cancelled
+            await track_event(
+                "booking_cancelled",
+                user_id=user_id,
+                service_id=booking_session.service_id,
+                cancelled_at_step="confirmation",
+                reason="user_initiated"
+            )
         delete_booking_session(user_id)
         await query.edit_message_text("❌ Booking cancelled.")
         return ConversationHandler.END
@@ -349,12 +408,21 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text("❌ Session expired. Please start again.")
         return ConversationHandler.END
 
+    # Track booking confirmed
+    await track_event(
+        "booking_confirmed",
+        user_id=user_id,
+        service_id=booking_session.service_id,
+        step_number=4
+    )
+
     timestamp = booking_session.timestamp
     office_id = booking_session.office_id
     service_id = booking_session.service_id
     name = booking_session.name
     email = booking_session.email
     captcha_token = booking_session.captcha_token
+    booking_start_time = booking_session.created_at
 
     await query.edit_message_text(
         "⏳ Processing your booking...\n" "This may take a few seconds."
@@ -371,10 +439,25 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             email=email,
         )
 
+        # Calculate duration
+        duration_ms = int((datetime.utcnow() - booking_start_time).total_seconds() * 1000)
+
         if result:
             process_id = result.get("processId")
             dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
             time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
+
+            # Track booking completed (success)
+            service_info = get_service_info(service_id)
+            await track_event(
+                "booking_completed",
+                user_id=user_id,
+                service_id=service_id,
+                service_name=service_info["name"] if service_info else f"Service {service_id}",
+                status="success",
+                duration_ms=duration_ms,
+                booking_id=process_id
+            )
 
             keyboard = [
                 [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
@@ -397,6 +480,18 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode="HTML",
             )
         else:
+            # Track booking completed (failure)
+            service_info = get_service_info(service_id)
+            await track_event(
+                "booking_completed",
+                user_id=user_id,
+                service_id=service_id,
+                service_name=service_info["name"] if service_info else f"Service {service_id}",
+                status="failure",
+                failure_reason="slot_taken_or_api_error",
+                duration_ms=duration_ms
+            )
+
             keyboard = [
                 [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
             ]
@@ -439,6 +534,24 @@ async def cancel_booking_button(
     await query.answer()
 
     user_id = update.effective_user.id
+    booking_session = get_booking_session(user_id)
+    if booking_session:
+        # Determine at which step the cancellation happened
+        step_map = {
+            "ASKING_NAME": "name_entry",
+            "ASKING_EMAIL": "email_entry",
+        }
+        cancelled_at_step = step_map.get(booking_session.state, "unknown")
+
+        # Track booking cancelled
+        await track_event(
+            "booking_cancelled",
+            user_id=user_id,
+            service_id=booking_session.service_id,
+            cancelled_at_step=cancelled_at_step,
+            reason="user_initiated"
+        )
+
     delete_booking_session(user_id)
 
     await query.edit_message_text("❌ Booking cancelled.")
@@ -451,6 +564,17 @@ async def cancel_booking_conversation(
 ) -> int:
     """Cancel the booking conversation"""
     user_id = update.effective_user.id
+    booking_session = get_booking_session(user_id)
+    if booking_session:
+        # Track booking cancelled
+        await track_event(
+            "booking_cancelled",
+            user_id=user_id,
+            service_id=booking_session.service_id,
+            cancelled_at_step="unknown",
+            reason="user_initiated"
+        )
+
     delete_booking_session(user_id)
 
     await update.message.reply_text("❌ Booking cancelled.")

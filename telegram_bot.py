@@ -27,6 +27,7 @@ from src.handlers.buttons import button_callback
 
 # Import services
 from src.services.appointment_checker import check_and_notify, set_bot_start_time
+from src.services.analytics_service import cleanup_analytics
 
 # Configure logging
 logging.basicConfig(
@@ -58,6 +59,13 @@ async def post_init(application: Application) -> None:
     logger.info("Background appointment checker started")
 
 
+async def post_shutdown(application: Application) -> None:
+    """Post-shutdown callback - cleanup analytics HTTP client"""
+    logger.info("Shutting down bot...")
+    await cleanup_analytics()
+    logger.info("Bot shutdown complete")
+
+
 def main() -> None:
     """Start the bot"""
     config = get_config()
@@ -71,6 +79,7 @@ def main() -> None:
         Application.builder()
         .token(config.telegram_bot_token)
         .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
 

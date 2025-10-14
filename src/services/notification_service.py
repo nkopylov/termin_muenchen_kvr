@@ -12,6 +12,7 @@ from telegram.ext import Application
 from src.termin_tracker import get_available_slots
 from src.services.queue_manager import is_user_in_queue
 from src.config import get_config
+from src.services.analytics_service import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +141,42 @@ async def notify_users_of_appointment(
             )
             message_ids[user_id] = sent_msg.message_id
             logger.info(f"Sent initial notification to user {user_id}")
+
+            # Track notification sent
+            await track_event(
+                "notification_sent",
+                user_id=user_id,
+                service_id=service_id,
+                service_name=service_name,
+                notification_type="initial",
+                slots_count=len(available_days)
+            )
         except Exception as e:
+            error_str = str(e).lower()
             logger.error(f"Failed to send initial notification to user {user_id}: {e}")
+
+            # Determine error type
+            if "blocked" in error_str or "bot was blocked by the user" in error_str:
+                error_type = "user_blocked_bot"
+
+                # Track user blocked bot
+                await track_event(
+                    "user_blocked_bot",
+                    user_id=user_id,
+                    last_command_timestamp=datetime.utcnow().isoformat()
+                )
+            elif "rate" in error_str or "too many requests" in error_str:
+                error_type = "rate_limit_exceeded"
+            else:
+                error_type = "telegram_api_error"
+
+            # Track notification failure
+            await track_event(
+                "notification_failed",
+                user_id=user_id,
+                service_id=service_id,
+                error_type=error_type
+            )
 
     # STEP 2: Fetch time slots and build slots_by_date
     slots_by_date = {}  # {date: [time slots]}

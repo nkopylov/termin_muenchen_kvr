@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.repositories import UserRepository
+from src.services.analytics_service import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 start_date=today.strftime("%Y-%m-%d"),
                 end_date=end_date.strftime("%Y-%m-%d"),
             )
+
+            # Track new user registration
+            await track_event(
+                "user_registered",
+                user_id=user_id,
+                username=username or "anonymous"
+            )
+        else:
+            # Existing user - check if re-engaged
+            if user.subscribed_at:
+                days_inactive = (datetime.utcnow() - user.subscribed_at).days
+                if days_inactive > 30:
+                    await track_event(
+                        "user_reengaged",
+                        user_id=user_id,
+                        days_inactive=days_inactive
+                    )
 
     # Show welcome message
     welcome_msg = (
