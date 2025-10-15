@@ -1,5 +1,5 @@
 """
-/stats command - Show bot statistics (admin only in practice, but no hard restriction)
+/stats command - Show bot statistics (admin only)
 """
 
 import logging
@@ -7,6 +7,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from src.config import get_config
 from src.database import get_session
 from src.repositories import UserRepository, SubscriptionRepository
 from src.services.appointment_checker import get_stats
@@ -15,7 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show bot statistics"""
+    """Show bot statistics (admin only)"""
+    config = get_config()
+    user_id = update.effective_user.id
+
+    # Check if user is admin
+    if not config.admin_telegram_id or user_id != config.admin_telegram_id:
+        await update.message.reply_text(
+            "⛔️ This command is only available to the bot administrator."
+        )
+        logger.warning(f"User {user_id} attempted to access /stats command")
+        return
+
     stats = get_stats()
 
     uptime = "N/A"
@@ -47,6 +59,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"❌ Failed: {stats['failed_checks']}\n"
         f"📊 Success rate: {success_rate:.1f}%\n\n"
         f"🎯 Appointments found: {stats['appointments_found_count']}\n"
+        f"🚀 Bookings started: {stats['bookings_started']}\n"
+        f"✅ Bookings completed: {stats['bookings_completed']}\n"
     )
 
     if stats["last_check_time"]:

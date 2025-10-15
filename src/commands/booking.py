@@ -20,6 +20,10 @@ from src.termin_tracker import get_available_slots
 from src.database import get_session
 from src.repositories import BookingSessionRepository
 from src.services.analytics_service import track_event
+from src.services.appointment_checker import (
+    increment_bookings_started,
+    increment_bookings_completed,
+)
 from src.services_manager import get_service_info
 
 logger = logging.getLogger(__name__)
@@ -165,15 +169,20 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             state="SELECTING_TIME",
         )
 
+        # Increment booking started stats
+        increment_bookings_started()
+
         # Track booking started
         service_info = get_service_info(service_id)
         await track_event(
             "booking_started",
             user_id=user_id,
             service_id=service_id,
-            service_name=service_info["name"] if service_info else f"Service {service_id}",
+            service_name=service_info["name"]
+            if service_info
+            else f"Service {service_id}",
             office_id=office_id,
-            selected_date=date
+            selected_date=date,
         )
 
         # Create inline keyboard with time slots
@@ -225,7 +234,7 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 user_id=user_id,
                 service_id=booking_session.service_id,
                 cancelled_at_step="time_selection",
-                reason="user_initiated"
+                reason="user_initiated",
             )
         delete_booking_session(user_id)
         await query.edit_message_text("❌ Booking cancelled.")
@@ -252,7 +261,7 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         "slot_selected",
         user_id=user_id,
         service_id=booking_session.service_id,
-        selected_time=dt.strftime("%H:%M")
+        selected_time=dt.strftime("%H:%M"),
     )
 
     time_str = dt.strftime("%H:%M on %Y-%m-%d")
@@ -303,7 +312,7 @@ async def name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             "name_entered",
             user_id=user_id,
             service_id=booking_session.service_id,
-            step_number=2
+            step_number=2,
         )
 
     keyboard = [
@@ -352,7 +361,7 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "email_entered",
         user_id=user_id,
         service_id=booking_session.service_id,
-        step_number=3
+        step_number=3,
     )
 
     dt = datetime.fromtimestamp(booking_session.timestamp, tz=ZoneInfo("Europe/Berlin"))
@@ -396,7 +405,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 user_id=user_id,
                 service_id=booking_session.service_id,
                 cancelled_at_step="confirmation",
-                reason="user_initiated"
+                reason="user_initiated",
             )
         delete_booking_session(user_id)
         await query.edit_message_text("❌ Booking cancelled.")
@@ -413,7 +422,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "booking_confirmed",
         user_id=user_id,
         service_id=booking_session.service_id,
-        step_number=4
+        step_number=4,
     )
 
     timestamp = booking_session.timestamp
@@ -440,12 +449,17 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
         # Calculate duration
-        duration_ms = int((datetime.utcnow() - booking_start_time).total_seconds() * 1000)
+        duration_ms = int(
+            (datetime.utcnow() - booking_start_time).total_seconds() * 1000
+        )
 
         if result:
             process_id = result.get("processId")
             dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
             time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
+
+            # Increment booking completed stats
+            increment_bookings_completed()
 
             # Track booking completed (success)
             service_info = get_service_info(service_id)
@@ -453,10 +467,12 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "booking_completed",
                 user_id=user_id,
                 service_id=service_id,
-                service_name=service_info["name"] if service_info else f"Service {service_id}",
+                service_name=service_info["name"]
+                if service_info
+                else f"Service {service_id}",
                 status="success",
                 duration_ms=duration_ms,
-                booking_id=process_id
+                booking_id=process_id,
             )
 
             keyboard = [
@@ -486,10 +502,12 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "booking_completed",
                 user_id=user_id,
                 service_id=service_id,
-                service_name=service_info["name"] if service_info else f"Service {service_id}",
+                service_name=service_info["name"]
+                if service_info
+                else f"Service {service_id}",
                 status="failure",
                 failure_reason="slot_taken_or_api_error",
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
 
             keyboard = [
@@ -549,7 +567,7 @@ async def cancel_booking_button(
             user_id=user_id,
             service_id=booking_session.service_id,
             cancelled_at_step=cancelled_at_step,
-            reason="user_initiated"
+            reason="user_initiated",
         )
 
     delete_booking_session(user_id)
@@ -572,7 +590,7 @@ async def cancel_booking_conversation(
             user_id=user_id,
             service_id=booking_session.service_id,
             cancelled_at_step="unknown",
-            reason="user_initiated"
+            reason="user_initiated",
         )
 
     delete_booking_session(user_id)

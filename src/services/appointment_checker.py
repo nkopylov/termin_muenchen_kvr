@@ -29,6 +29,8 @@ stats = {
     "successful_checks": 0,
     "failed_checks": 0,
     "appointments_found_count": 0,
+    "bookings_started": 0,
+    "bookings_completed": 0,
     "last_check_time": None,
     "last_success_time": None,
     "bot_start_time": None,
@@ -47,6 +49,16 @@ def get_stats() -> dict:
 def set_bot_start_time() -> None:
     """Set bot start time in stats"""
     stats["bot_start_time"] = datetime.now()
+
+
+def increment_bookings_started() -> None:
+    """Increment bookings started counter"""
+    stats["bookings_started"] += 1
+
+
+def increment_bookings_completed() -> None:
+    """Increment bookings completed counter"""
+    stats["bookings_completed"] += 1
 
 
 def get_user_date_range(user_id: int) -> tuple[str | None, str | None]:
@@ -155,7 +167,7 @@ async def check_and_notify(application: Application) -> None:
                         "captcha_solved",
                         success=False,
                         duration_ms=captcha_duration_ms,
-                        consecutive_failures=consecutive_failures
+                        consecutive_failures=consecutive_failures,
                     )
 
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
@@ -169,7 +181,7 @@ async def check_and_notify(application: Application) -> None:
                         await track_event(
                             "health_alert",
                             alert_type="consecutive_failures",
-                            consecutive_failures=consecutive_failures
+                            consecutive_failures=consecutive_failures,
                         )
 
                     await asyncio.sleep(config.check_interval)
@@ -180,7 +192,7 @@ async def check_and_notify(application: Application) -> None:
                     "captcha_solved",
                     success=True,
                     duration_ms=captcha_duration_ms,
-                    consecutive_failures=0
+                    consecutive_failures=0,
                 )
 
                 token_expires_at = time.time() + 280  # ~4.5 minutes
@@ -231,7 +243,7 @@ async def check_and_notify(application: Application) -> None:
 
                     if isinstance(data, dict):
                         if "errorCode" in data:
-                            error_msg = data.get('errorMessage', '')
+                            error_msg = data.get("errorMessage", "")
                             logger.warning(
                                 f"API error: {data['errorCode']} - {error_msg}"
                             )
@@ -244,7 +256,7 @@ async def check_and_notify(application: Application) -> None:
                                 "api_error",
                                 endpoint="get_available_days",
                                 error_type="api_error_code",
-                                error_message=f"{data['errorCode']}: {error_msg}"
+                                error_message=f"{data['errorCode']}: {error_msg}",
                             )
                         elif data and len(data) > 0:
                             # Extract available days from response
@@ -280,7 +292,7 @@ async def check_and_notify(application: Application) -> None:
                             service_name=service_name,
                             office_id=office_id,
                             slots_count=slots_count,
-                            matched_users=len(date_user_ids)
+                            matched_users=len(date_user_ids),
                         )
 
                         # Log the appointment with repository
@@ -318,7 +330,7 @@ async def check_and_notify(application: Application) -> None:
                 "api_error",
                 endpoint="check_and_notify",
                 error_type="exception",
-                error_message=str(e)
+                error_message=str(e),
             )
 
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
@@ -332,7 +344,7 @@ async def check_and_notify(application: Application) -> None:
                 await track_event(
                     "health_alert",
                     alert_type="high_error_rate",
-                    consecutive_failures=consecutive_failures
+                    consecutive_failures=consecutive_failures,
                 )
 
         # Track batch completion
@@ -343,7 +355,7 @@ async def check_and_notify(application: Application) -> None:
             successful_checks=batch_successful,
             failed_checks=batch_failed,
             appointments_found=batch_appointments_found,
-            duration_ms=batch_duration_ms
+            duration_ms=batch_duration_ms,
         )
 
         await asyncio.sleep(config.check_interval)
