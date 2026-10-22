@@ -55,11 +55,9 @@ _full_payload_cache = None
 
 def fetch_services() -> Optional[List[Dict]]:
     """Fetch all available services from API"""
-    api_client = get_api_client()
-    data = api_client.get("services")
+    services = get_full_payload().get("services", [])
 
-    if data:
-        services = data.get("services", [])
+    if services:
         logger.info(f"Fetched {len(services)} services from API")
         return services
     else:

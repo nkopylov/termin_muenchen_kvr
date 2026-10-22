@@ -150,7 +150,7 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         # Extract appointments (timestamps)
         appointments = []
         for office in slots_data.get("offices", []):
-            if office.get("officeId") == int(office_id):
+            if int(office.get("officeId")) == int(office_id):
                 appointments = office.get("appointments", [])
                 break
 

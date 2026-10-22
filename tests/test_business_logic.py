@@ -337,3 +337,19 @@ class TestStatsTracking:
 
         assert hours == 3
         assert minutes == 45
+
+
+class TestNotificationFormatting:
+    """Tests for notification_service.py formatting"""
+
+    def test_format_available_days(self):
+        from src.services.notification_service import format_available_appointments
+
+        data = {
+            "availableDays": [
+                {"date": "2026-12-03", "providerIDs": "10461", "offices": []},
+                {"date": "2026-12-04", "providerIDs": "10461", "offices": []},
+            ]
+        }
+
+        assert format_available_appointments(data) == "📅 2026-12-03\n📅 2026-12-04"

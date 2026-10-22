@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import struct
 import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -27,7 +28,7 @@ def get_captcha_challenge():
     challenge_data = api_client.get("captcha-challenge/")
     if challenge_data:
         logger.info(
-            f"Captcha challenge received: maxnumber={challenge_data.get('maxnumber', 'unknown')}"
+            f"Captcha challenge received: cost={challenge_data.get('parameters', {}).get('cost', 'unknown')}"
         )
     else:
         logger.error("Failed to get captcha challenge")
@@ -35,63 +36,77 @@ def get_captcha_challenge():
     return challenge_data
 
 
+HASH_ALGORITHMS = {"SHA-256": "sha256", "SHA-384": "sha384", "SHA-512": "sha512"}
+
+
 def solve_captcha_challenge(challenge_data):
     """
-    Solve the proof-of-work captcha challenge.
-    challenge_data: dict with algorithm, challenge, maxnumber, salt, signature
-    Returns the solution dict with number and time taken.
+    Solve the ALTCHA proof-of-work challenge.
+    challenge_data: dict with "parameters" (algorithm, nonce, salt, cost, keyLength, keyPrefix) and "signature"
+    Returns the solution dict with counter, derivedKey and time taken in ms.
     """
-    algorithm = challenge_data.get("algorithm", "SHA-256")
-    challenge = challenge_data.get("challenge")
-    maxnumber = challenge_data.get("maxnumber", 10000000)
-    salt = challenge_data.get("salt")
-    signature = challenge_data.get("signature")
+    parameters = challenge_data.get("parameters", {})
+    algorithm = parameters.get("algorithm")
+    hash_name = HASH_ALGORITHMS.get(algorithm)
+    if hash_name is None:
+        logger.error(f"Unsupported captcha algorithm: {algorithm}")
+        return None
+
+    salt = bytes.fromhex(parameters["salt"])
+    nonce = bytes.fromhex(parameters["nonce"])
+    key_prefix = parameters["keyPrefix"].lower()
+    key_length = parameters.get("keyLength") or 32
+    cost = max(1, parameters.get("cost", 1))
 
     logger.info(
-        f"Solving captcha challenge (algorithm={algorithm}, max {maxnumber} iterations)..."
+        f"Solving captcha challenge (algorithm={algorithm}, cost={cost}, keyPrefix={key_prefix})..."
     )
-    start_time = time.time()
+    start_time = time.perf_counter()
 
-    for number in range(maxnumber):
-        # Create the hash input: salt + number
-        hash_input = f"{salt}{number}"
-        # Calculate SHA-256 hash
-        hash_result = hashlib.sha256(hash_input.encode()).hexdigest()
+    for counter in range(2**32):
+        # Key = hash applied `cost` times to salt + nonce + big-endian uint32 counter
+        derived_key = salt + nonce + struct.pack(">I", counter)
+        for _ in range(cost):
+            derived_key = hashlib.new(hash_name, derived_key).digest()
+        derived_key_hex = derived_key[:key_length].hex()
 
-        # Check if hash matches the challenge
-        if hash_result == challenge:
-            took_ms = int((time.time() - start_time) * 1000)
-            logger.info(f"Captcha solved! Found number: {number} in {took_ms}ms")
+        if derived_key_hex.startswith(key_prefix):
+            took_ms = round((time.perf_counter() - start_time) * 1000, 1)
+            logger.info(f"Captcha solved! Found counter: {counter} in {took_ms}ms")
             return {
-                "algorithm": algorithm,
-                "challenge": challenge,
-                "number": number,
-                "salt": salt,
-                "signature": signature,
-                "took": took_ms,
+                "counter": counter,
+                "derivedKey": derived_key_hex,
+                "time": took_ms,
             }
 
-        # Progress indicator every 100k iterations
-        if number > 0 and number % 100000 == 0:
-            logger.debug(f"Captcha solving progress: {number:,} iterations")
-
-    logger.error("Failed to solve captcha within maxnumber limit")
+    logger.error("Failed to solve captcha: counter space exhausted")
     return None
 
 
-def verify_captcha_solution(solution):
+def build_captcha_payload(challenge_data, solution):
+    """
+    Encode the challenge and its solution as the base64 JSON payload expected by captcha-verify.
+    """
+    payload = {
+        "challenge": {
+            "parameters": challenge_data["parameters"],
+            "signature": challenge_data["signature"],
+        },
+        "solution": solution,
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+def verify_captcha_solution(challenge_data, solution):
     """
     Submit the captcha solution to get a JWT token.
+    challenge_data: the challenge the solution was computed for
     solution: dict with the proof-of-work solution
     Returns the JWT token string.
     """
     api_client = get_api_client()
 
-    # Encode solution as base64 JSON payload
-    solution_json = json.dumps(solution)
-    payload = base64.b64encode(solution_json.encode()).decode()
-
-    data = {"payload": payload}
+    data = {"payload": build_captcha_payload(challenge_data, solution)}
 
     logger.info("Verifying captcha solution with server...")
     result = api_client.post("captcha-verify/", data)
@@ -137,7 +152,7 @@ async def get_fresh_captcha_token():
 
     # Step 3: Verify solution and get token (I/O bound, quick)
     token = await loop.run_in_executor(
-        _captcha_executor, verify_captcha_solution, solution
+        _captcha_executor, verify_captcha_solution, challenge, solution
     )
 
     if token:
@@ -147,9 +162,33 @@ async def get_fresh_captcha_token():
     return token
 
 
+def get_available_calendar(
+    start_date, end_date, office_id, service_id, captcha_token, slots_date=None
+):
+    """
+    Query the available-calendar endpoint.
+    The server returns appointment slots for one day only: slots_date, or the first bookable day if omitted.
+    """
+    api_client = get_api_client()
+
+    params = {
+        "startDate": start_date,
+        "endDate": end_date,
+        "officeIds": office_id,
+        "serviceIds": service_id,
+        "serviceCounts": "1",
+        "captchaToken": captcha_token,
+    }
+    if slots_date:
+        params["slotsStartDate"] = slots_date
+        params["slotsEndDate"] = slots_date
+
+    return api_client.get("available-calendar/", params=params)
+
+
 def get_available_slots(date, office_id, service_id, captcha_token):
     """
-    Get available time slots for a specific date using available-appointments-by-office endpoint.
+    Get available time slots for a specific date.
 
     date: e.g. '2025-10-13'
     office_id: e.g. '10461' (can be comma-separated for multiple offices)
@@ -157,37 +196,36 @@ def get_available_slots(date, office_id, service_id, captcha_token):
     captcha_token: JWT token from the website (required for Ausländerbehörde services)
 
     Returns: {
+        "date": "2025-10-13",
+        "providerIDs": "10461",
         "offices": [
             {
-                "officeId": 10461,
+                "officeId": "10461",
                 "appointments": [1760340600, 1760340900, ...]  # Unix timestamps
             }
         ]
     }
+    or None if the request failed.
     """
-    api_client = get_api_client()
-
-    params = {
-        "date": date,
-        "officeId": office_id,
-        "serviceId": service_id,
-        "serviceCount": "1",
-        "captchaToken": captcha_token,
-    }
-
     logger.debug(
         f"Fetching slots for {date} (office={office_id}, service={service_id})"
     )
-    data = api_client.get("available-appointments-by-office/", params=params)
+    data = get_available_calendar(
+        date, date, office_id, service_id, captcha_token, slots_date=date
+    )
+    if data is None:
+        return None
 
-    if data:
-        # Count total appointments across all offices
-        total_appointments = sum(
-            len(office.get("appointments", [])) for office in data.get("offices", [])
-        )
-        logger.debug(f"Successfully fetched {total_appointments} slots for {date}")
+    day = next((d for d in data.get("availableDays", []) if d["date"] == date), None)
+    if day is None:
+        return {"date": date, "providerIDs": "", "offices": []}
 
-    return data
+    # Count total appointments across all offices
+    total_appointments = sum(
+        len(office.get("appointments", [])) for office in day.get("offices", [])
+    )
+    logger.debug(f"Successfully fetched {total_appointments} slots for {date}")
+    return day
 
 
 def get_available_days(
@@ -198,23 +236,14 @@ def get_available_days(
     start_date: e.g. '2025-10-02'
     end_date: e.g. '2026-04-02'
     captcha_token: JWT token from the website
-    Returns the available days information.
+    Returns the calendar dict whose "availableDays" lists {"date", "providerIDs", "offices"} entries.
     """
-    api_client = get_api_client()
-
-    params = {
-        "startDate": start_date,
-        "endDate": end_date,
-        "officeId": office_id,
-        "serviceId": service_id,
-        "serviceCount": "1",
-        "captchaToken": captcha_token,
-    }
-
     logger.info(
         f"Checking available days: {start_date} to {end_date} (office={office_id}, service={service_id})"
     )
-    data = api_client.get("available-days-by-office/", params=params)
+    data = get_available_calendar(
+        start_date, end_date, office_id, service_id, captcha_token
+    )
 
     if data:
         logger.info(f"API response received: {data}")

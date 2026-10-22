@@ -47,12 +47,12 @@ def format_available_appointments(data) -> str:
 
         return result.strip()
 
-    # Handle Munich API format without slots: {'availableDays': [{'time': '2025-10-13', 'providerIDs': '10461'}]}
+    # Handle Munich API format without slots: {'availableDays': [{'date': '2025-10-13', 'providerIDs': '10461', 'offices': [...]}]}
     if isinstance(data, dict) and "availableDays" in data:
         available_days = data["availableDays"]
         if available_days:
             for day in available_days[:5]:
-                date = day.get("time", "Unknown date")
+                date = day.get("date", "Unknown date")
                 result += f"📅 {date}\n"
             if len(available_days) > 5:
                 result += f"... and {len(available_days) - 5} more days\n"
@@ -110,7 +110,7 @@ async def notify_users_of_appointment(
     available_days = data.get("availableDays", [])
 
     # STEP 1: Send immediate notification with dates only
-    initial_dates = "\n".join([f"📅 {day.get('time')}" for day in available_days[:5]])
+    initial_dates = "\n".join([f"📅 {day.get('date')}" for day in available_days[:5]])
     if len(available_days) > 5:
         initial_dates += f"\n... and {len(available_days) - 5} more days"
 
@@ -181,7 +181,7 @@ async def notify_users_of_appointment(
     # STEP 2: Fetch time slots and build slots_by_date
     slots_by_date = {}  # {date: [time slots]}
     for day_info in available_days[:5]:
-        date = day_info.get("time")
+        date = day_info.get("date")
         if date:
             slots_data = get_available_slots(
                 date, str(office_id), str(service_id), captcha_token
@@ -238,7 +238,7 @@ async def notify_users_of_appointment(
     # Create inline keyboard with booking buttons for each available date
     keyboard = []
     for day_info in available_days[:5]:  # Show first 5 dates
-        date = day_info.get("time")
+        date = day_info.get("date")
         if date:
             keyboard.append(
                 [
