@@ -403,7 +403,9 @@ async def _start_booking(
         t("booking.fetching_slots", lang, date=day_label(day, lang)),
     )
     if previous is not None and previous.message_id not in (None, message_id):
-        await safe_strip_markup(context.bot, chat_id, previous.message_id)
+        await safe_edit_text(
+            context.bot, chat_id, previous.message_id, t("booking.cancelled", lang)
+        )
 
     run_for_user(
         context,
@@ -453,6 +455,8 @@ async def _show_times(
         if _still_watching(user_id, watch_id):
             text += "\n\n" + t("booking.will_send_days", lang)
         await safe_edit_text(bot, chat_id, message_id, text)
+        if await _cancelled_meanwhile(bot, user_id, chat_id, message_id, lang):
+            return
         _end_session_of(user_id, message_id)
         return
 
@@ -472,8 +476,22 @@ async def _show_times(
         t("booking.select_time", lang, date=label),
         times_markup(times, service_id, _several_places(service_id, office_ids), lang),
     )
+    if await _cancelled_meanwhile(bot, user_id, chat_id, message_id, lang):
+        return
     if outcome in (EditOutcome.GONE, EditOutcome.FORBIDDEN):
         _end_session_of(user_id, message_id)
+
+
+async def _cancelled_meanwhile(
+    bot, user_id: int, chat_id: int, message_id: int, lang: str
+) -> bool:
+    """After an edit of a booking message: if its booking was cancelled or replaced while the
+    edit was on its way, that edit may have overwritten "cancelled"; put it back"""
+    session = get_active_session(user_id)
+    if session is not None and session.message_id == message_id:
+        return False
+    await safe_edit_text(bot, chat_id, message_id, t("booking.cancelled", lang))
+    return True
 
 
 def _several_places(service_id: int, office_ids: list[int]) -> bool:

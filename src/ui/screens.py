@@ -61,6 +61,20 @@ async def show_screen(
     return message
 
 
+async def send_screen(
+    bot, user_id: int, chat_id: int, text: str, markup
+) -> tuple[Message | None, EditOutcome]:
+    """Send a nav screen as a new message; the previous nav message loses its buttons."""
+    stored = _pointer(user_id)
+    message, outcome = await safe_send(bot, chat_id, text, markup)
+    if message is None:
+        return None, outcome
+    if stored is not None and stored != message.message_id:
+        await safe_strip_markup(bot, chat_id, stored)
+    _set_pointer(user_id, message.message_id)
+    return message, outcome
+
+
 def forget_nav_message(user_id: int, message_id: int | None = None) -> None:
     """Clear the pointer if it is `message_id` (or unconditionally when None)."""
     with get_session() as session:

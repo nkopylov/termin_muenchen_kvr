@@ -11,6 +11,7 @@ from src.i18n import is_language_chosen, t
 from src.repositories import UserRepository, WatchRepository
 from src.ui.commands_menu import set_chat_commands
 from src.ui.keyboard import main_keyboard
+from src.ui.screens import send_screen
 from src.ui.telegram_safe import EditOutcome, safe_send
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ async def _ask_for_language(bot) -> None:
     asked = 0
     for user_id in _watchers_without_language():
         text, markup = build_language_picker(None)
-        message, outcome = await safe_send(bot, user_id, text, markup)
+        message, outcome = await send_screen(bot, user_id, user_id, text, markup)
         if message is not None:
             _set_ui_version(user_id, UI_COMMANDS_SET)
             asked += 1

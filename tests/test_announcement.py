@@ -5,13 +5,15 @@ import pytest
 from sqlmodel import Session
 from telegram import ReplyKeyboardMarkup
 from telegram.error import Forbidden, NetworkError
+from telegram.ext import ApplicationHandlerStop
 
+from src.commands.language import language_gate
 from src.i18n import t
 from src.repositories import UserRepository, WatchRepository
 from src.services.announcement import announce_new_ui
 from src.ui.commands_menu import bot_commands
 from src.watches.when import PRESETS
-from tests.fakes import FakeBot
+from tests.fakes import FakeBot, FakeContext, make_text_update
 
 pytestmark = pytest.mark.asyncio
 
@@ -98,6 +100,27 @@ async def test_watcher_without_language_is_asked_for_one(db):
     ]
     assert ui_version(db, NO_LANGUAGE) == 1
     assert ui_version(db, 7) == 0
+
+
+async def test_startup_picker_is_retired_by_the_next_picker(db):
+    add_user(db, NO_LANGUAGE, "", watches=1)
+    bot = FakeBot()
+    await announce_new_ui(bot)
+    [startup_picker] = bot.sent
+
+    with pytest.raises(ApplicationHandlerStop):
+        await language_gate(
+            make_text_update("/watches", user_id=NO_LANGUAGE, bot=bot),
+            FakeContext(bot),
+        )
+
+    gate_picker = bot.sent[-1]
+    assert gate_picker.text == t("language.picker_prompt", "en")
+    [stripped] = bot.calls_of("edit_message_reply_markup")
+    assert stripped.message_id == startup_picker.message_id
+    with Session(db) as session:
+        pointer = UserRepository(session).get_nav_message_id(NO_LANGUAGE)
+    assert pointer == gate_picker.message_id
 
 
 async def test_idempotent(db, users):

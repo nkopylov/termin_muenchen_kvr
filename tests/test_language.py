@@ -565,6 +565,61 @@ class TestGate:
         assert update.callback_query.edits == []
         assert context.bot.sent[-1].text == t("language.picker_prompt", "en")
 
+    async def test_gated_picker_retires_the_previous_one(self, db):
+        add_user(db, "")
+        bot = RecordingBot()
+        context = FakeContext(bot)
+
+        with pytest.raises(ApplicationHandlerStop):
+            await language_gate(make_text_update("/watches", bot=bot), context)
+        with pytest.raises(ApplicationHandlerStop):
+            await language_gate(
+                make_callback_update("w1:list", message_id=77, bot=bot), context
+            )
+
+        first, second = bot.sent
+        assert first.text == second.text == t("language.picker_prompt", "en")
+        [stripped] = bot.calls_of("edit_message_reply_markup")
+        assert stripped.message_id == first.message_id
+        assert bot.edits == []
+        assert nav_pointer(db) == second.message_id
+
+    async def test_start_picker_is_retired_by_the_gate(self, db, events):
+        add_user(db, "")
+        bot = RecordingBot()
+        context = FakeContext(bot)
+
+        await start_command(make_text_update("/start", bot=bot), context)
+        with pytest.raises(ApplicationHandlerStop):
+            await language_gate(make_text_update("/watches", bot=bot), context)
+
+        start_picker, gate_picker = bot.sent
+        [stripped] = bot.calls_of("edit_message_reply_markup")
+        assert stripped.message_id == start_picker.message_id
+        assert nav_pointer(db) == gate_picker.message_id
+
+    async def test_choice_from_the_gated_picker_runs_onboarding(
+        self, db, events, find_screen
+    ):
+        add_user(db, "")
+        bot = RecordingBot()
+        context = FakeContext(bot)
+        with pytest.raises(ApplicationHandlerStop):
+            await language_gate(make_text_update("/watches", bot=bot), context)
+        [picker] = bot.sent
+
+        await language_choice_callback(
+            make_callback_update("lang:en", message_id=picker.message_id, bot=bot),
+            context,
+        )
+
+        assert stored_language(db) == "en"
+        [deleted] = bot.calls_of("delete_message")
+        assert deleted.message_id == picker.message_id
+        assert bot.calls_of("edit_message_reply_markup") == []
+        assert bot.sent[-1].text == FIND_TEXT
+        assert nav_pointer(db) == bot.sent[-1].message_id
+
     @pytest.mark.parametrize(
         "kwargs",
         [

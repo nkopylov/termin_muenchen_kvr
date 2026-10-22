@@ -27,7 +27,7 @@ from src.ui.commands_menu import (  # noqa: F401  (re-exported for callers of th
     set_default_commands,
 )
 from src.ui.keyboard import main_keyboard
-from src.ui.screens import show_screen
+from src.ui.screens import forget_nav_message, show_screen
 from src.ui.telegram_safe import safe_answer, safe_delete, safe_edit_text, safe_send
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,7 @@ async def language_choice_callback(
         return
     if pressed is not None:
         await safe_delete(context.bot, chat_id, pressed)
+        forget_nav_message(user.id, pressed)
     await send_onboarding(context.bot, chat_id, user.id, lang, returning=False)
 
 

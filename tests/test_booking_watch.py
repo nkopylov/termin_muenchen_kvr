@@ -458,7 +458,7 @@ class TestBookTapEdgeCases:
         assert second == ("stop", None)
         assert len(fake_availability.day_calls) == 1
 
-    async def test_new_book_tap_strips_the_previous_booking_message(
+    async def test_new_book_tap_cancels_the_previous_booking_message(
         self, db, user, context, bot, fake_availability
     ):
         first_watch = make_watch(db)
@@ -475,9 +475,34 @@ class TestBookTapEdgeCases:
         )
         await context.drain()
 
-        stripped = bot.calls_of("edit_message_reply_markup")
-        assert [(c.message_id, c.reply_markup) for c in stripped] == [(LIVE_MSG, None)]
+        last = edits_of(bot, LIVE_MSG)[-1]
+        assert (last.text, last.reply_markup) == (t("booking.cancelled", "en"), None)
         assert get_booking(db)[:3] == (second_watch, FUEHRERSCHEIN_OFFICE, OLD_MSG)
+
+    async def test_times_shown_after_a_new_book_tap_are_cancelled_again(
+        self, db, user, context, bot, monkeypatch, fake_availability
+    ):
+        first = make_watch(db)
+        second = make_watch(db, FUEHRERSCHEIN, FUEHRERSCHEIN_OFFICE, live=False)
+        fake_availability.day_results = [
+            (SlotTime(ts(9), FORSTENRIEDER),),
+            (SlotTime(ts(8), FUEHRERSCHEIN_OFFICE),),
+        ]
+        await tap(booking.book_day, context, book_data(first))
+
+        async def second_tap_meanwhile(name, **_):
+            # The first booking's times passed its session check; the user taps Book again
+            if name == "booking_started" and get_booking(db)[2] == LIVE_MSG:
+                await tap(booking.book_day, context, book_data(second), OLD_MSG)
+
+        monkeypatch.setattr(booking, "track_event", second_tap_meanwhile)
+        await context.drain()
+
+        last = edits_of(bot, LIVE_MSG)[-1]
+        assert (last.text, last.reply_markup) == (t("booking.cancelled", "en"), None)
+        assert edits_of(bot, OLD_MSG)[-1].text == t(
+            "booking.select_time", "en", date="Thu 29.10"
+        )
 
     async def test_cancel_while_times_load_leaves_the_message_alone(
         self, db, user, context, bot, monkeypatch, fake_availability
@@ -515,7 +540,8 @@ class TestBookTapEdgeCases:
         await context.drain()
 
         assert [e.text for e in edits_of(bot, LIVE_MSG)] == [
-            t("booking.fetching_slots", "en", date="Thu 29.10")
+            t("booking.fetching_slots", "en", date="Thu 29.10"),
+            t("booking.cancelled", "en"),
         ]
         assert edits_of(bot, OLD_MSG)[-1].text == t(
             "booking.select_time", "en", date="Thu 29.10"

@@ -5,6 +5,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from src.i18n import DEFAULT_LANGUAGE, t
+from src.ui.screens import send_screen
 
 RUSSIAN_LIKELY_CODES = ("ru", "uk", "be", "kk")
 
@@ -38,8 +39,8 @@ def build_language_picker(
 async def send_language_picker(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Send the picker as a new message in the update's chat."""
+    """Send the picker as the new nav message in the update's chat."""
     text, markup = build_language_picker(update.effective_user.language_code)
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, text=text, reply_markup=markup
+    await send_screen(
+        context.bot, update.effective_user.id, update.effective_chat.id, text, markup
     )
