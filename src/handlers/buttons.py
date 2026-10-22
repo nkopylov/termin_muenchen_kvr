@@ -17,6 +17,8 @@ from src.services_manager import (
 from src.services.appointment_checker import get_stats, get_user_date_range
 from src.config import get_config
 from src.services.analytics_service import track_event
+from src.i18n import t
+from src.i18n.user_language import get_user_language
 
 
 async def show_main_menu(query, user_id: int):
@@ -32,6 +34,12 @@ async def show_main_menu(query, user_id: int):
         [InlineKeyboardButton("📊 My Subscriptions", callback_data="myservices")],
         [InlineKeyboardButton("📅 Set Date Range", callback_data="setdates")],
         [InlineKeyboardButton("ℹ️ Subscription Status", callback_data="status")],
+        [
+            InlineKeyboardButton(
+                t("language.btn_menu", get_user_language(user_id)),
+                callback_data="language",
+            )
+        ],
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)

@@ -20,7 +20,7 @@ class User(SQLModel, table=True):
     subscribed_at: NaiveDatetime = Field(default_factory=datetime.utcnow)
     start_date: Optional[str] = Field(default=None, max_length=10)
     end_date: Optional[str] = Field(default=None, max_length=10)
-    language: str = Field(default="de", max_length=2)
+    language: str = Field(default="", max_length=2)
 
     # Relationships
     subscriptions: List["ServiceSubscription"] = Relationship(back_populates="user")

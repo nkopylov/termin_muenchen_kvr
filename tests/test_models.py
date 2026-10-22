@@ -18,7 +18,7 @@ class TestUserModel:
 
         assert user.user_id == 12345
         assert user.username is None
-        assert user.language == "de"  # Default value
+        assert user.language == ""  # Default value: not chosen yet
 
     def test_create_user_full(self, db_session):
         """Test creating user with all fields"""
@@ -39,12 +39,12 @@ class TestUserModel:
         assert user.end_date == "2025-12-31"
 
     def test_user_default_language(self, db_session):
-        """Test user language defaults to 'de'"""
+        """Test user language defaults to unset (empty string)"""
         user = User(user_id=12345)
         db_session.add(user)
         db_session.commit()
 
-        assert user.language == "de"
+        assert user.language == ""
 
     def test_user_unique_id(self, db_session):
         """Test user_id must be unique"""

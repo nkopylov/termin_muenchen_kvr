@@ -4,8 +4,8 @@ Minimal bot setup that wires together all commands and handlers.
 """
 
 import logging
-from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, TypeHandler
 
 from src.config import get_config
 from src.database import init_database
@@ -21,6 +21,13 @@ from src.commands.status import status_command
 from src.commands.stats import stats_command
 from src.commands.help import help_command
 from src.commands.booking import booking_conversation
+from src.commands.language import (
+    language_choice_callback,
+    language_command,
+    language_gate,
+    language_menu_callback,
+    set_default_commands,
+)
 
 # Import handlers
 from src.handlers.buttons import button_callback
@@ -41,17 +48,7 @@ async def post_init(application: Application) -> None:
     set_bot_start_time()
 
     # Set bot commands for menu
-    commands = [
-        BotCommand("start", "Start the bot and register"),
-        BotCommand("menu", "Show main menu"),
-        BotCommand("subscribe", "Subscribe to available Termins"),
-        BotCommand("myservices", "View your subscriptions"),
-        BotCommand("setdates", "Set date range filter"),
-        BotCommand("status", "Show your status"),
-        BotCommand("help", "Show help and documentation"),
-        BotCommand("stop", "Unsubscribe and delete data"),
-    ]
-    await application.bot.set_my_commands(commands)
+    await set_default_commands(application.bot)
     logger.info("Bot commands set")
 
     # Start background task for checking appointments
@@ -64,6 +61,38 @@ async def post_shutdown(application: Application) -> None:
     logger.info("Shutting down bot...")
     await cleanup_analytics()
     logger.info("Bot shutdown complete")
+
+
+def register_handlers(application: Application) -> None:
+    """Register all update handlers in dispatch order"""
+    # Runs before every other handler; stops users without a language until they choose
+    application.add_handler(TypeHandler(Update, language_gate), group=-1)
+
+    # Register command handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("menu", menu_command))
+    application.add_handler(CommandHandler("subscribe", subscribe_command))
+    application.add_handler(CommandHandler("myservices", myservices_command))
+    application.add_handler(CommandHandler("setdates", setdates_command))
+    application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("language", language_command))
+
+    # Register booking conversation handler
+    application.add_handler(booking_conversation)
+
+    # Language callbacks must precede the catch-all button handler
+    application.add_handler(
+        CallbackQueryHandler(language_choice_callback, pattern="^lang:")
+    )
+    application.add_handler(
+        CallbackQueryHandler(language_menu_callback, pattern="^language$")
+    )
+
+    # Register button callback handler
+    application.add_handler(CallbackQueryHandler(button_callback))
 
 
 def main() -> None:
@@ -83,22 +112,7 @@ def main() -> None:
         .build()
     )
 
-    # Register command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("menu", menu_command))
-    application.add_handler(CommandHandler("subscribe", subscribe_command))
-    application.add_handler(CommandHandler("myservices", myservices_command))
-    application.add_handler(CommandHandler("setdates", setdates_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("help", help_command))
-
-    # Register booking conversation handler
-    application.add_handler(booking_conversation)
-
-    # Register button callback handler
-    application.add_handler(CallbackQueryHandler(button_callback))
+    register_handlers(application)
 
     # Start bot
     logger.info("Starting bot...")

@@ -8,6 +8,8 @@ from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.repositories import UserRepository
+from src.i18n import t
+from src.i18n.user_language import get_user_language
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,12 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         [InlineKeyboardButton("📊 My Subscriptions", callback_data="myservices")],
         [InlineKeyboardButton("📅 Set Date Range", callback_data="setdates")],
         [InlineKeyboardButton("ℹ️ Subscription Status", callback_data="status")],
+        [
+            InlineKeyboardButton(
+                t("language.btn_menu", get_user_language(user_id, context)),
+                callback_data="language",
+            )
+        ],
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)

@@ -43,8 +43,20 @@ def init_database() -> None:
 
     # Create all tables
     SQLModel.metadata.create_all(engine)
+    _run_migrations(engine)
 
     logger.info("Database tables initialized")
+
+
+def _run_migrations(engine) -> None:
+    """Apply one-time data migrations, tracked with SQLite's PRAGMA user_version"""
+    with engine.begin() as conn:
+        version = conn.exec_driver_sql("PRAGMA user_version").scalar()
+        if version < 1:
+            # Existing users are asked to choose their language on next interaction
+            conn.exec_driver_sql("UPDATE users SET language = ''")
+            conn.exec_driver_sql("PRAGMA user_version = 1")
+            logger.info("Migration 1 applied: user languages reset to unset")
 
 
 @contextmanager
