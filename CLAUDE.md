@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Munich Appointment Bot - A Telegram bot that monitors the Munich city appointment system and notifies users when appointments become available. Features multi-service subscriptions and automated booking.
+Munich Appointment Bot - A Telegram bot that monitors the Munich city appointment system and notifies users when appointments become available. Users create **watches** (one service; one office or any office; a time such as "as soon as possible" or "before 15.11"), get one live alert message per watch, and can book in the chat.
 
-**Recent Refactoring (v2.1.0)**: Reorganized codebase into clean service/command architecture with separation of concerns.
+The watches design (data model, alert lifecycle, callback data, screens) is in `DOCS/WATCHES_DESIGN.md`.
 
 ## Running the Bot
 
@@ -31,95 +31,99 @@ python3 telegram_bot.py
 
 ```
 /
-├── telegram_bot.py              # Minimal entry point - wires everything together
+├── telegram_bot.py              # Entry point: builds the Application, registers handlers, post_init
 ├── src/
-│   ├── services/                # Business logic layer
-│   │   ├── appointment_checker.py  # Background checking + stats
-│   │   ├── notification_service.py # User notifications
-│   │   └── queue_manager.py        # Booking mode queue
-│   ├── commands/                # Command handlers (one per command)
-│   │   ├── start.py            # /start command
-│   │   ├── stop.py             # /stop command
-│   │   ├── menu.py             # /menu command
-│   │   ├── subscribe.py        # /subscribe command
-│   │   ├── myservices.py       # /myservices command
-│   │   ├── setdates.py         # /setdates command
-│   │   ├── status.py           # /status command
-│   │   ├── stats.py            # /stats command
-│   │   └── booking.py          # Booking conversation handler
-│   ├── handlers/                # Event handlers
-│   │   └── buttons.py          # Inline button callbacks
+│   ├── commands/                # Command and callback handlers (one file per command or screen)
+│   │   ├── start.py            # /start, onboarding after the first language choice
+│   │   ├── find.py             # /find (+ /menu, /subscribe): popular, browse, office and time steps (f1:)
+│   │   ├── watches.py          # /watches (+ /myservices, /status, /setdates): My watches (w1:)
+│   │   ├── settings.py         # /settings: language, saved booking details, delete data (s1:)
+│   │   ├── help.py             # /help
+│   │   ├── language.py         # /language, language picker callbacks, language gate
+│   │   ├── stop.py             # /stop confirmation, delete_user_data
+│   │   ├── stats.py            # /stats (admin)
+│   │   └── booking.py          # Booking ConversationHandler (b1:) and orphan booking buttons
+│   ├── handlers/                # Cross-cutting update handlers
+│   │   ├── presence.py         # Group -3: resumes blocked pauses, delivers the reply keyboard once
+│   │   ├── interaction_tracker.py # Group -2: marks taps on live alerts and queued messages
+│   │   ├── menu_keyboard.py    # Reply keyboard taps (Find, My watches, Settings, Help)
+│   │   ├── text_input.py       # Plain text: typed date answer or service search
+│   │   ├── fallback_callbacks.py # Callbacks without a scheme prefix to their screens; catch-all
+│   │   ├── language_picker.py  # Bilingual language picker
+│   │   └── errors.py           # Application error handler
+│   ├── services/                # Business logic with side effects
+│   │   ├── appointment_checker.py # Background checker loop, run_check_cycle, stats
+│   │   ├── alert_lifecycle.py  # apply_alert, end_watch_by_checker, expired booking cleanup
+│   │   ├── immediate_check.py  # Check right after a watch is created or changed
+│   │   ├── service_search.py   # Typed service search with synonyms
+│   │   ├── announcement.py     # One-time announcement of the reply-keyboard menu at startup
+│   │   ├── captcha_token.py    # Shared captcha token cache
+│   │   ├── queue_manager.py    # is_user_in_queue: the user has an active booking session
+│   │   ├── locks.py            # Named asyncio locks per event loop
+│   │   └── analytics_service.py # Umami analytics
+│   ├── watches/                 # Watch logic (mostly pure)
+│   │   ├── when.py             # Time presets, date parsing, search windows
+│   │   ├── slots.py            # Slot identity, snapshots, calendar filtering
+│   │   ├── alert_decision.py   # Pure push/edit/defer decision for a live alert
+│   │   ├── alert_view.py       # Alert rendering (text, buttons, hash)
+│   │   ├── alert_ops.py        # Per-watch lock, close_live_alert, pending retires
+│   │   ├── availability.py     # City calendar queries for watches (token + retry)
+│   │   └── labels.py           # Service, office, time and date labels
+│   ├── ui/                      # Telegram helpers
+│   │   ├── telegram_safe.py    # send/edit/delete/answer that never raise Telegram errors
+│   │   ├── screens.py          # show_screen: one nav message per user, edited in place
+│   │   ├── callbacks.py        # Callback data builders, parser, handler patterns
+│   │   ├── keyboard.py         # Persistent reply keyboard
+│   │   ├── commands_menu.py    # Telegram command lists per language
+│   │   └── background.py       # run_for_user: slow work outside the update queue
 │   ├── i18n/                    # Bot text in English and Russian, t() and user language (see DOCS/I18N.md)
 │   ├── config.py               # Pydantic Settings
-│   ├── database.py             # Session management
+│   ├── database.py             # Engine, sessions, migrations (PRAGMA user_version)
 │   ├── db_models.py            # SQLModel ORM models
-│   ├── repositories.py         # Repository pattern for DB access
+│   ├── repositories.py         # Repository pattern for DB access (WatchRepository, ...)
 │   ├── booking_api.py          # Booking API integration
+│   ├── munich_api_client.py    # HTTP client for the city API (status and error codes)
 │   ├── termin_tracker.py       # Munich API client (CAPTCHA, availability)
 │   └── services_manager.py     # Service catalog management
+├── tests/                       # pytest; tests/fakes.py has FakeBot, fake updates and contexts
 ├── DOCS/                        # Documentation
-├── .env                         # Configuration (not in git)
+├── .env                         # Configuration (not committed)
 └── bot_data.db                 # SQLite database
 ```
 
-### Three-Layer Architecture
+### Layers
 
-1. **Services Layer** (`src/services/`)
-   - `appointment_checker.py` - Background task for monitoring appointments, CAPTCHA management, stats tracking
-   - `notification_service.py` - Sends notifications to users with progressive time slot updates
-   - `queue_manager.py` - Manages booking queue to pause notifications during interactive booking
-
-2. **Commands Layer** (`src/commands/`)
-   - One file per command for easy navigation
-   - Each command is self-contained with its logic
-   - `booking.py` contains the multi-step booking conversation handler
-
-3. **Handlers Layer** (`src/handlers/`)
-   - `buttons.py` - Handles all inline keyboard button callbacks
-   - Includes helper functions for showing menus, service lists, etc.
-
-4. **Core Infrastructure** (`src/`)
-   - Pydantic configuration with validation
-   - SQLModel ORM with repository pattern
-   - Session management with context managers
-
-5. **External Integration** (`src/`)
-   - Munich appointment API client
-   - CAPTCHA handling and availability checks
-   - Service catalog management
+1. **Commands and handlers** (`src/commands/`, `src/handlers/`) - one file per command or screen. Handlers
+   answer the callback first and move slow work (captcha + HTTP) into `run_for_user` background tasks.
+2. **Services** (`src/services/`) - checker loop, alert lifecycle, immediate checks, search, announcement.
+3. **Watch logic** (`src/watches/`) - time specs, snapshots, alert decisions and rendering, mostly pure.
+4. **UI helpers** (`src/ui/`) - safe Telegram calls, nav screens, callback data, keyboards.
+5. **Core infrastructure** (`src/`) - Pydantic configuration, SQLModel ORM with repositories, sessions.
+6. **External integration** (`src/`) - Munich appointment API client, CAPTCHA, service catalog.
 
 ### Key Patterns
 
 **Repository Pattern** - All database access goes through repositories:
 ```python
 from src.database import get_session
-from src.repositories import UserRepository
+from src.repositories import WatchRepository
 
 with get_session() as session:
-    user_repo = UserRepository(session)
-    user = user_repo.get_user(user_id)
+    watches = WatchRepository(session)
+    rec = watches.get_for_user(watch_id, user_id)  # immutable WatchRecord
 ```
 
-**Service Layer** - Business logic is in services:
+**Live alert writes hold the watch lock** - every change of a watch's live alert happens under
+`alert_lock(watch_id)`, after re-reading the watch:
 ```python
-from src.services.queue_manager import add_user_to_queue, is_user_in_queue
+from src.watches.alert_ops import alert_lock, close_live_alert
 
-# Add user to booking queue (pauses notifications)
-add_user_to_queue(user_id)
-
-# Check if user is in queue
-if is_user_in_queue(user_id):
-    # Skip notification
-    pass
+async with alert_lock(watch_id):
+    ...  # re-read, change status, close_live_alert(...)
 ```
 
-**Command Organization** - Each command in its own file:
-```python
-# src/commands/start.py
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
-    # Command logic here
-```
+**Safe Telegram calls** - `src/ui/telegram_safe.py` returns an `EditOutcome` instead of raising. Navigation
+screens go through `show_screen`, so only one nav message per user keeps its buttons.
 
 **Configuration** - Centralized with Pydantic:
 ```python
@@ -129,47 +133,50 @@ config = get_config()  # Singleton
 config.telegram_bot_token  # Validated on startup
 ```
 
+**Text** - all user-facing text goes through `t(key, lang)`; see `DOCS/I18N.md`.
+
 ## Adding New Commands
 
 1. Create new file in `src/commands/` (e.g., `mycommand.py`)
 2. Implement command handler function (e.g., `mycommand_command(update, context)`)
-3. Import and register in `telegram_bot.py`:
+3. Add it to `COMMANDS` in `telegram_bot.py` (registered in group 1, private chats only):
 ```python
 from src.commands.mycommand import mycommand_command
 # ...
-application.add_handler(CommandHandler("mycommand", mycommand_command))
+COMMANDS = (
+    # ...
+    ("mycommand", mycommand_command),
+)
 ```
+4. To list it in Telegram's command menu, add it to `BOT_COMMANDS` in `src/ui/commands_menu.py` and a
+   `commands.<name>` text to both catalogs.
 
 ## Background Task Architecture
 
-`check_and_notify()` in `src/services/appointment_checker.py`:
-1. Fetches all unique service/office combinations from subscriptions
-2. Groups users by service AND date range
-3. Refreshes CAPTCHA token every ~4.5 minutes
-4. Checks Munich API for each service/office/date-range combination
-5. Delegates to `notification_service.py` to notify users
-6. Respects queue manager - skips users in active booking mode
-7. Implements health monitoring with consecutive failure tracking
+`check_and_notify()` in `src/services/appointment_checker.py` loops over `run_check_cycle(bot, today, now)`:
+1. Finalizes queued messages (`process_pending_retires`), refreshes the catalog every 6 h, deletes expired
+   booking sessions
+2. Ends watches past their deadline or whose office is no longer public (silent "ended" message)
+3. Groups active watches by service: one calendar query per service per cycle (captcha token fetched right
+   before each call, retried once on a token error, per-office fallback on a combination error)
+4. Builds and records a snapshot per watch
+5. `apply_alert` decides per watch: push a new alert, edit the live one in place, or defer while the user is
+   booking or tapped the alert in the last 10 minutes
+6. Removes the buttons of replaced alerts after all pushes of the cycle
+7. Health monitoring with consecutive failure tracking
 
-## Queue Mode Pattern
+## Booking Sessions
 
-To prevent notifications from interrupting interactive flows:
-```python
-from src.services.queue_manager import add_user_to_queue, remove_user_from_queue
-
-# At start of interactive flow
-add_user_to_queue(user_id)
-
-# At end of interactive flow (or on cancellation)
-remove_user_from_queue(user_id)
-```
-
-The queue manager automatically:
-- Tracks users with timestamps
-- Times out stale sessions after 10 minutes
-- Provides `is_user_in_queue()` check for notification service
+A user with an unexpired booking session gets no alert changes (`is_user_in_queue` in
+`src/services/queue_manager.py`, read-only). Sessions live in the DB (`booking_sessions`): the checker deletes
+expired ones every cycle, and `post_init` deletes all of them on startup.
 
 ## Migration History
+
+✅ **Watches**:
+- Watches replace subscriptions and the global date range (DB migration 2 converts them)
+- Find flow with search, persistent reply keyboard, My watches, Settings
+- One live alert per watch, edited in place; booking from the alert
 
 ✅ **v2.1.0 - Architecture Refactoring**:
 - Reorganized into `services/`, `commands/`, `handlers/` structure

@@ -1,35 +1,33 @@
-"""
-/start command - Register new users and show welcome message
-"""
+# ABOUTME: /start registers new users (then asks for a language) and welcomes everyone else.
+# ABOUTME: Onboarding sends the reply keyboard, then Find for new users or My watches for watchers.
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.commands import find, watches
 from src.database import get_session
+from src.handlers import text_input
 from src.handlers.language_picker import send_language_picker
+from src.handlers.presence import UI_KEYBOARD_DELIVERED
 from src.i18n import is_language_chosen, t
 from src.i18n.user_language import clear_cached_language, get_user_language
-from src.repositories import UserRepository
+from src.repositories import UserRepository, WatchRepository
 from src.services.analytics_service import track_event
+from src.ui.keyboard import main_keyboard
+from src.ui.screens import retire_nav_message
+from src.ui.telegram_safe import safe_send
+from src.watches import when
 
 logger = logging.getLogger(__name__)
 
 
 async def register_user(user_id: int, username: str | None) -> None:
-    """Create a user with the default date range and no language chosen yet"""
-    # New user - create with default date range
-    today = datetime.now()
-    end_date = today + timedelta(days=180)
+    """Create a user with no language chosen yet"""
     with get_session() as session:
-        UserRepository(session).create_user(
-            user_id=user_id,
-            username=username,
-            start_date=today.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d"),
-        )
+        UserRepository(session).create_user(user_id=user_id, username=username)
 
     # Track new user registration
     await track_event(
@@ -37,21 +35,38 @@ async def register_user(user_id: int, username: str | None) -> None:
     )
 
 
-def build_welcome(lang: str) -> tuple[str, InlineKeyboardMarkup]:
-    """Welcome text and its Main Menu button in the given language"""
-    # Add menu button
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                t("common.btn_main_menu", lang), callback_data="main_menu"
-            )
-        ]
-    ]
-    return t("start.welcome", lang), InlineKeyboardMarkup(keyboard)
+async def send_onboarding(
+    bot, chat_id: int, user_id: int, lang: str, returning: bool
+) -> None:
+    """Welcome with the reply keyboard, then the Find screen or My watches. A first
+    welcome for someone who already has watches (migrated subscriptions) explains them."""
+    with get_session() as session:
+        open_watches = WatchRepository(session).count_open(user_id)
+    if returning:
+        text = t("start.welcome_back", lang)
+    elif open_watches:
+        text = t("start.announce", lang, watches=t("keyboard.watches", lang))
+    else:
+        text = t("start.welcome", lang)
+    welcome, _ = await safe_send(bot, chat_id, text, main_keyboard(lang))
+    if welcome is not None:
+        with get_session() as session:
+            UserRepository(session).set_ui_version(user_id, UI_KEYBOARD_DELIVERED)
+
+    if open_watches:
+        text, markup = watches.build_watches_screen(user_id, lang, when.utcnow())
+    else:
+        text, markup = find.build_find_screen(lang)
+    await retire_nav_message(bot, user_id)
+    screen, _ = await safe_send(bot, chat_id, text, markup)
+    if screen is not None:
+        with get_session() as session:
+            UserRepository(session).set_nav_message_id(user_id, screen.message_id)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /start command"""
+    text_input.clear_pending_input(context)
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
 
@@ -78,8 +93,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await send_language_picker(update, context)
         return
 
-    # Show welcome message
-    welcome_msg, reply_markup = build_welcome(get_user_language(user_id, context))
-    await update.message.reply_text(
-        welcome_msg, reply_markup=reply_markup, parse_mode="HTML"
+    await send_onboarding(
+        context.bot,
+        update.effective_chat.id,
+        user_id,
+        get_user_language(user_id, context),
+        returning=True,
     )

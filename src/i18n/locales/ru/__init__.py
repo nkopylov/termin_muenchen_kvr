@@ -2,21 +2,20 @@
 # ABOUTME: Every area module must be listed in AREAS to be loaded.
 
 from src.i18n.locales.ru import (
+    alert,
     booking,
-    buttons,
     categories,
     commands,
     common,
+    find,
     help,
+    keyboard,
     language,
-    menu,
-    myservices,
-    notify,
-    setdates,
+    settings,
     start,
-    status,
     stop,
-    subscribe,
+    watch,
+    watches,
 )
 
 AREAS = (
@@ -25,14 +24,13 @@ AREAS = (
     language,
     start,
     help,
-    menu,
     stop,
-    subscribe,
-    myservices,
-    setdates,
-    status,
-    buttons,
     categories,
     booking,
-    notify,
+    keyboard,
+    watch,
+    alert,
+    find,
+    watches,
+    settings,
 )

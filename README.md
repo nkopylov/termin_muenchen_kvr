@@ -6,10 +6,16 @@ Telegram bot that monitors Munich city appointment system and notifies users whe
 
 ## Features
 
-- **Multi-service subscriptions** - Track multiple appointment types simultaneously
-- **Automated booking** - Book appointments directly through the bot
-- **Date range filtering** - Only get notified for appointments in your preferred timeframe
-- **Real-time notifications** - Get instant alerts when appointments become available
+- **Watches** - Up to 5 searches at once, each for one service, at one office or any office, with its own time:
+  as soon as possible, within 2 weeks / 1 month / 3 months, before a date, or between two dates
+- **Find by typing or browsing** - Type what you need ("passport", "Anmeldung", "паспорт") or pick a popular
+  service or a category
+- **Immediate check** - A new watch shows the current free days right away
+- **One live alert per watch** - New free days arrive as one message with Book buttons; later changes edit it in
+  place, and older alerts lose their buttons
+- **In-chat booking** - Book a free time without leaving Telegram; your name and email can be reused next time
+- **Menu at the bottom of the chat** - Find, My watches, Settings, Help
+- **English and Russian**
 
 ## Quick Start
 
@@ -22,7 +28,7 @@ cp .env.example .env
 uv pip install --system -r pyproject.toml
 
 # Initialize database
-python3 -c "from database import init_database; init_database()"
+python3 -c "from src.database import init_database; init_database()"
 
 # Run
 python3 telegram_bot.py
@@ -39,13 +45,16 @@ Optional:
 ## Bot Commands
 
 - `/start` - Register and get started
-- `/menu` - Show main menu
-- `/subscribe` - Browse and subscribe to services
-- `/myservices` - Manage your subscriptions
-- `/setdates <start> <end>` - Set date range (YYYY-MM-DD)
-- `/status` - View your settings
-- `/stats` - View bot statistics
-- `/stop` - Unsubscribe from all
+- `/find` - Find a Termin and start a watch
+- `/watches` - My watches: change time, pause, resume, stop
+- `/settings` - Language, saved booking details, deleting your data
+- `/help` - How it works
+- `/language` - Change language
+- `/stop` - Delete all your data
+- `/stats` - Bot statistics (admin only)
+
+Older commands still work: `/menu` and `/subscribe` open Find; `/myservices`, `/status` and `/setdates` open
+My watches.
 
 ## Architecture
 

@@ -1,506 +1,695 @@
-"""
-Tests for booking flow state machine
-Tests the complex multi-step booking conversation flow
-"""
+# ABOUTME: Tests for the booking conversation steps and the city booking calls behind them.
+# ABOUTME: City API and captcha are faked at the HTTP-result level; DB is in-memory, Telegram a FakeBot.
 
+import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, Mock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
-
-from src.commands.booking import (
-    create_booking_session,
-    delete_booking_session,
-    get_booking_session,
-    update_booking_session,
+import pytest_asyncio
+from sqlmodel import Session
+from telegram.ext import (
+    Application,
+    ApplicationHandlerStop,
+    CallbackQueryHandler,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )
+
+from src import booking_api
+from src.commands import booking
+from src.i18n import t
+from src.munich_api_client import ApiResponse
+from src.repositories import BookingSessionRepository, UserRepository, WatchRepository
+from src.ui.background import user_lock
+from src.ui.callbacks import BOOK_RE, NAV_RE, UNVERSIONED_BOOKING_RE
+from src.ui.keyboard import MENU_FILTER
+from src.watches.slots import SlotTime
+from src.watches.when import PRESETS
+from tests.conftest import NOW
+from tests.fakes import FakeBot, FakeContext, make_callback_update, make_text_update
+
+TS = 1_793_264_400
+OFFICE = 102526
+SERVICE = 1063475
+SERVICE_NAME = "Wohnsitzanmeldung"
+SCOPE = {"id": 1, "provider": {"name": "Bürgerbüro Forstenrieder Allee"}}
+RESERVED = {"processId": 77, "authKey": "ak", "timestamp": str(TS), "scope": SCOPE}
+
+
+def ok(data: dict) -> ApiResponse:
+    return ApiResponse(data, 200, ())
+
+
+def rejected(*codes: str) -> ApiResponse:
+    return ApiResponse(None, 400, codes)
+
+
+async def book() -> dict | None:
+    return await booking_api.book_appointment(
+        timestamp=TS,
+        office_id=OFFICE,
+        service_id=SERVICE,
+        service_name=SERVICE_NAME,
+        family_name="Ivan Petrov",
+        email="ivan@example.com",
+    )
+
+
+def posted(fake_api) -> list[tuple[str, dict]]:
+    return [(endpoint, data) for method, endpoint, data in fake_api["calls"]]
+
+
+@pytest.mark.asyncio
+class TestBookAppointment:
+    async def test_reserve_update_preconfirm_with_a_fresh_token(
+        self, fake_api, fake_token
+    ):
+        fake_api["post"] = [
+            ok(RESERVED),
+            ok({"processId": 77}),
+            ok({"processId": 77, "status": "preconfirmed"}),
+        ]
+
+        result = await book()
+
+        assert result == {"processId": 77, "status": "preconfirmed"}
+        calls = posted(fake_api)
+        assert [endpoint for endpoint, _ in calls] == [
+            "reserve-appointment/",
+            "update-appointment/",
+            "preconfirm-appointment/",
+        ]
+        reserve = calls[0][1]
+        assert reserve["captchaToken"] == "token-1"
+        assert (reserve["timestamp"], reserve["officeId"], reserve["serviceId"]) == (
+            TS,
+            OFFICE,
+            [SERVICE],
+        )
+        for _, data in calls[1:]:
+            assert data["serviceName"] == SERVICE_NAME
+            assert data["familyName"] == "Ivan Petrov"
+            assert data["email"] == "ivan@example.com"
+            assert data["officeName"] == "Bürgerbüro Forstenrieder Allee"
+        assert fake_token["invalidated"] == 0
+
+    async def test_rejected_token_is_replaced_and_reserve_retried_once(
+        self, fake_api, fake_token
+    ):
+        fake_api["post"] = [
+            rejected("captchaInvalid"),
+            ok(RESERVED),
+            ok({"processId": 77}),
+            ok({"processId": 77}),
+        ]
+
+        result = await book()
+
+        assert result == {"processId": 77}
+        reserves = [d for e, d in posted(fake_api) if e == "reserve-appointment/"]
+        assert [d["captchaToken"] for d in reserves] == ["token-1", "token-2"]
+        assert fake_token["invalidated"] == 1
+
+    async def test_second_token_rejection_gives_up(self, fake_api, fake_token):
+        fake_api["post"] = [rejected("captchaExpired"), rejected("captchaInvalid")]
+
+        assert await book() is None
+        assert [e for e, _ in posted(fake_api)] == ["reserve-appointment/"] * 2
+        assert fake_token["invalidated"] == 2
+
+    async def test_other_reserve_failure_is_not_retried(self, fake_api, fake_token):
+        fake_api["post"] = [rejected("appointmentNotAvailable")]
+
+        assert await book() is None
+        assert len(posted(fake_api)) == 1
+        assert fake_token["invalidated"] == 0
+
+    async def test_reservation_without_auth_key_fails(self, fake_api, fake_token):
+        fake_api["post"] = [ok({"processId": 77})]
+
+        assert await book() is None
+        assert len(posted(fake_api)) == 1
+
+    async def test_no_token_means_no_call(self, fake_api, fake_token):
+        fake_token["fail"] = True
+
+        assert await book() is None
+        assert fake_api["calls"] == []
+
+    @pytest.mark.parametrize("failing_step", [1, 2])
+    async def test_failed_later_step_fails_the_booking(
+        self, fake_api, fake_token, failing_step
+    ):
+        replies = [ok(RESERVED), ok({"processId": 77}), ok({"processId": 77})]
+        replies[failing_step] = rejected()
+        fake_api["post"] = replies
+
+        assert await book() is None
+        assert len(posted(fake_api)) == failing_step + 1
+
+
+# Conversation steps (handlers called directly; a live session makes them stop group 1)
+
+USER = 4242
+MSG = 500
+NEXT_MSG = 1000
+NAME = "Ivan Petrov"
+EMAIL = "ivan@example.com"
+BERLIN = ZoneInfo("Europe/Berlin")
+SLOT_TS = int(datetime(2026, 10, 29, 9, 30, tzinfo=BERLIN).timestamp())
+LONG_TIME = "09:30 on Thursday, October 29, 2026"
+STEPS = pytest.mark.usefixtures("catalog", "clock", "today")
+
+
+@pytest.fixture
+def bot():
+    return FakeBot(first_message_id=NEXT_MSG)
+
+
+@pytest.fixture
+def context(bot):
+    return FakeContext(bot, user_data={"lang": "en", "await_date": {"kind": "before"}})
 
 
 @pytest.fixture(autouse=True)
-def english_user():
-    """Booking handlers read the user's language from the DB; these tests run without one."""
-    with patch("src.commands.booking.get_user_language", return_value="en"):
-        yield
+def quiet_events(events):
+    events.patch(booking)
+    return events
 
 
-class TestBookingSessionManagement:
-    """Tests for booking session lifecycle management"""
+@pytest.fixture
+def user(db):
+    with Session(db) as session:
+        UserRepository(session).create_user(USER, username="tester", language="en")
+    return USER
 
-    @patch("src.commands.booking.get_session")
-    def test_create_booking_session(self, mock_get_session):
-        """Test creating a new booking session"""
-        mock_session = Mock()
-        mock_session.__enter__ = Mock(return_value=mock_session)
-        mock_session.__exit__ = Mock(return_value=False)
-        mock_get_session.return_value = mock_session
 
-        mock_booking_repo = Mock()
+def save_contact(db, name=NAME, email=EMAIL):
+    with Session(db) as session:
+        UserRepository(session).set_booking_contact(USER, name, email)
 
-        with patch("src.commands.booking.BookingSessionRepository") as MockBookingRepo:
-            MockBookingRepo.return_value = mock_booking_repo
 
-            create_booking_session(
-                user_id=12345,
-                service_id=100,
-                office_id=200,
-                date="2025-01-15",
-                captcha_token="token123",
-                state="SELECTING_TIME",
-            )
-
-            # Verify repository create_session was called
-            mock_booking_repo.create_session.assert_called_once()
-            call_args = mock_booking_repo.create_session.call_args[1]
-            assert call_args["user_id"] == 12345
-            assert call_args["service_id"] == 100
-            assert call_args["office_id"] == 200
-            assert call_args["date"] == "2025-01-15"
-            assert call_args["captcha_token"] == "token123"
-            assert call_args["state"] == "SELECTING_TIME"
-
-    @patch("src.commands.booking.get_session")
-    def test_update_booking_session(self, mock_get_session):
-        """Test updating an existing booking session"""
-        mock_session = Mock()
-        mock_session.__enter__ = Mock(return_value=mock_session)
-        mock_session.__exit__ = Mock(return_value=False)
-        mock_get_session.return_value = mock_session
-
-        mock_booking_repo = Mock()
-
-        with patch("src.commands.booking.BookingSessionRepository") as MockBookingRepo:
-            MockBookingRepo.return_value = mock_booking_repo
-
-            update_booking_session(
-                user_id=12345,
-                state="ASKING_NAME",
-                timestamp=1234567890,
-                name="John Doe",
-            )
-
-            # Verify repository update_session was called
-            mock_booking_repo.update_session.assert_called_once_with(
-                12345, state="ASKING_NAME", timestamp=1234567890, name="John Doe"
-            )
-
-    @patch("src.commands.booking.get_session")
-    def test_delete_booking_session(self, mock_get_session):
-        """Test deleting a booking session"""
-        mock_session = Mock()
-        mock_session.__enter__ = Mock(return_value=mock_session)
-        mock_session.__exit__ = Mock(return_value=False)
-        mock_get_session.return_value = mock_session
-
-        mock_booking_repo = Mock()
-
-        with patch("src.commands.booking.BookingSessionRepository") as MockBookingRepo:
-            MockBookingRepo.return_value = mock_booking_repo
-
-            delete_booking_session(user_id=12345)
-
-            # Verify repository delete_session was called
-            mock_booking_repo.delete_session.assert_called_once_with(12345)
-
-    @patch("src.commands.booking.get_session")
-    def test_get_booking_session(self, mock_get_session):
-        """Test retrieving a booking session"""
-        from src.db_models import BookingSession
-
-        mock_session = Mock()
-        mock_session.__enter__ = Mock(return_value=mock_session)
-        mock_session.__exit__ = Mock(return_value=False)
-        mock_get_session.return_value = mock_session
-
-        mock_booking_repo = Mock()
-        mock_booking_session = BookingSession(
-            user_id=12345,
-            state="SELECTING_TIME",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token123",
-            expires_at=datetime.utcnow() + timedelta(minutes=15),
+def open_session(
+    db, state, *, message_id=MSG, timestamp=None, name=None, email=None, expires_in=15
+):
+    with Session(db) as session:
+        repo = BookingSessionRepository(session)
+        repo.create_session(
+            user_id=USER,
+            state=state,
+            service_id=SERVICE,
+            office_id=0,
+            date="2026-10-29",
+            captcha_token="",
+            expires_at=NOW + timedelta(minutes=expires_in),
+            watch_id=None,
+            message_id=message_id,
         )
-        mock_booking_repo.get_session.return_value = mock_booking_session
-
-        with patch("src.commands.booking.BookingSessionRepository") as MockBookingRepo:
-            MockBookingRepo.return_value = mock_booking_repo
-
-            session = get_booking_session(user_id=12345)
-
-            assert session.user_id == 12345
-            assert session.state == "SELECTING_TIME"
-            mock_booking_repo.get_session.assert_called_once_with(12345)
+        repo.update_session(USER, timestamp=timestamp, name=name, email=email)
 
 
-class TestBookingStateTransitions:
-    """Tests for booking conversation state transitions"""
+def session_row(db):
+    with Session(db) as session:
+        row = BookingSessionRepository(session).get_session(USER)
+        if row is None:
+            return None
+        return {
+            "state": row.state,
+            "office_id": row.office_id,
+            "timestamp": row.timestamp,
+            "name": row.name,
+            "email": row.email,
+            "message_id": row.message_id,
+        }
 
-    def test_state_progression_order(self):
-        """Test the expected order of booking states"""
-        from src.commands.booking import (
-            ASKING_EMAIL,
-            ASKING_NAME,
-            CONFIRMING,
-            SELECTING_TIME,
-        )
 
-        # Verify state constants are in correct order
-        # Note: Booking starts at SELECTING_TIME (no SELECTING_DATE state)
-        assert SELECTING_TIME == 0
-        assert ASKING_NAME == 1
-        assert ASKING_EMAIL == 2
-        assert CONFIRMING == 3
+async def run_step(handler, update, context):
+    """The state a step hands to the conversation; ("stop", s) when it also stops group 1"""
+    try:
+        return await handler(update, context)
+    except ApplicationHandlerStop as stop:
+        return ("stop", stop.state)
 
-    @pytest.mark.asyncio
-    @patch("src.commands.booking.get_booking_session")
-    @patch("src.commands.booking.update_booking_session")
-    async def test_transition_selecting_time_to_asking_name(
-        self, mock_update, mock_get_session
+
+async def press(handler, context, data, message_id=MSG):
+    return await run_step(
+        handler, make_callback_update(data, USER, message_id, bot=context.bot), context
+    )
+
+
+async def type_text(handler, context, text):
+    return await run_step(
+        handler, make_text_update(text, USER, bot=context.bot, message_id=77), context
+    )
+
+
+def buttons(markup):
+    return [(b.text, b.callback_data) for row in markup.inline_keyboard for b in row]
+
+
+@pytest.mark.asyncio
+@STEPS
+class TestTimeSelected:
+    async def test_without_saved_contact_asks_for_the_name(
+        self, db, user, context, bot
     ):
-        """Test transition from SELECTING_TIME to ASKING_NAME"""
-        from src.commands.booking import time_selected
-        from src.db_models import BookingSession
+        open_session(db, "SELECTING_TIME")
 
-        # Mock booking session
-        mock_session = BookingSession(
-            user_id=12345,
-            state="SELECTING_TIME",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token123",
-            expires_at=datetime.utcnow() + timedelta(minutes=15),
+        state = await press(booking.time_selected, context, f"b1:t:{OFFICE}:{SLOT_TS}")
+
+        assert state == ("stop", booking.ASKING_NAME)
+        [edit] = bot.edits
+        assert edit.message_id == MSG
+        assert edit.text == t("booking.ask_name", "en", time="Thu 29.10, 09:30")
+        assert buttons(edit.reply_markup) == [("❌ Cancel", "b1:x")]
+        row = session_row(db)
+        assert (row["state"], row["office_id"], row["timestamp"]) == (
+            "ASKING_NAME",
+            OFFICE,
+            SLOT_TS,
         )
-        mock_get_session.return_value = mock_session
 
-        # Mock Update and query
-        mock_update_obj = Mock()
-        mock_query = AsyncMock()
-        mock_query.data = "time_1234567890"
-        mock_query.answer = AsyncMock()
-        mock_query.edit_message_text = AsyncMock()
-        mock_update_obj.callback_query = mock_query
-        mock_update_obj.effective_user = Mock(id=12345)
+    async def test_with_saved_contact_offers_it(self, db, user, context, bot):
+        save_contact(db, name="<b>Ivan</b> Petrov", email="ivan@example.com")
+        open_session(db, "SELECTING_TIME")
 
-        mock_context = Mock()
+        state = await press(booking.time_selected, context, f"b1:t:{OFFICE}:{SLOT_TS}")
 
-        result = await time_selected(mock_update_obj, mock_context)
-
-        # Should transition to ASKING_NAME state
-        from src.commands.booking import ASKING_NAME
-
-        assert result == ASKING_NAME
-
-    def test_session_timeout_value(self):
-        """Test booking session timeout is set correctly"""
-        from src.commands.booking import BOOKING_SESSION_TIMEOUT_SECONDS
-
-        # 15 minutes = 900 seconds
-        assert BOOKING_SESSION_TIMEOUT_SECONDS == 900
-
-    @patch("src.commands.booking.get_session")
-    def test_session_expires_at_calculation(self, mock_get_session):
-        """Test expiration time is calculated correctly"""
-        from src.commands.booking import BOOKING_SESSION_TIMEOUT_SECONDS
-
-        mock_session = Mock()
-        mock_session.__enter__ = Mock(return_value=mock_session)
-        mock_session.__exit__ = Mock(return_value=False)
-        mock_get_session.return_value = mock_session
-
-        mock_booking_repo = Mock()
-
-        with patch("src.commands.booking.BookingSessionRepository") as MockBookingRepo:
-            MockBookingRepo.return_value = mock_booking_repo
-
-            before = datetime.utcnow()
-            create_booking_session(
-                user_id=12345,
-                service_id=100,
-                office_id=200,
-                date="2025-01-15",
-                captcha_token="token123",
-            )
-
-            call_args = mock_booking_repo.create_session.call_args[1]
-            expires_at = call_args["expires_at"]
-
-            # Verify expires_at is approximately 15 minutes from now
-            expected_expiry = before + timedelta(
-                seconds=BOOKING_SESSION_TIMEOUT_SECONDS
-            )
-            time_diff = abs((expires_at - expected_expiry).total_seconds())
-            assert time_diff < 2  # Within 2 seconds
-
-
-class TestBookingValidation:
-    """Tests for booking input validation"""
-
-    def test_name_validation_too_short(self):
-        """Test name must be at least 2 characters"""
-        names = ["", " ", "J", "  "]
-
-        for name in names:
-            assert len(name.strip()) < 2
-
-    def test_name_validation_valid(self):
-        """Test valid names pass validation"""
-        names = ["Jo", "John Doe", "Anna-Maria", "李明"]
-
-        for name in names:
-            assert len(name.strip()) >= 2
-
-    def test_email_validation_invalid(self):
-        """Test invalid email formats"""
-        emails = ["notanemail", "missing@domain", "no.at.sign", "@nodomain.com"]
-
-        for email in emails:
-            is_valid = "@" in email and "." in email
-            assert is_valid is False or email == "@nodomain.com"
-
-    def test_email_validation_valid(self):
-        """Test valid email formats"""
-        emails = [
-            "user@example.com",
-            "test.user@domain.co.uk",
-            "name+tag@test.org",
-            "firstname.lastname@company.com",
+        assert state == ("stop", booking.CONFIRMING)
+        [edit] = bot.edits
+        assert edit.text == t(
+            "booking.use_saved",
+            "en",
+            time=LONG_TIME,
+            office="Forstenrieder Allee",
+            name="&lt;b&gt;Ivan&lt;/b&gt; Petrov",
+            email="ivan@example.com",
+        )
+        assert edit.parse_mode == "HTML"
+        assert [data for _, data in buttons(edit.reply_markup)] == [
+            "b1:me",
+            "b1:chg",
+            "b1:x",
         ]
+        assert session_row(db)["state"] == "CONFIRMING"
 
-        for email in emails:
-            assert "@" in email and "." in email
+    async def test_change_asks_for_the_name(self, db, user, context, bot):
+        save_contact(db)
+        open_session(db, "CONFIRMING", timestamp=SLOT_TS)
 
+        state = await press(booking.change_contact, context, "b1:chg")
 
-class TestBookingCancellation:
-    """Tests for booking cancellation flow"""
+        assert state == ("stop", booking.ASKING_NAME)
+        assert bot.edits[-1].text == t(
+            "booking.ask_name", "en", time="Thu 29.10, 09:30"
+        )
+        assert session_row(db)["state"] == "ASKING_NAME"
 
-    @pytest.mark.asyncio
-    @patch("src.commands.booking.get_booking_session", return_value=None)
-    @patch("src.commands.booking.delete_booking_session")
-    async def test_cancel_from_time_selection(self, mock_delete, mock_get_session):
-        """Test canceling booking from time selection"""
-        from src.commands.booking import time_selected
-
-        mock_update = Mock()
-        mock_query = AsyncMock()
-        mock_query.data = "cancel_booking"
-        mock_query.answer = AsyncMock()
-        mock_query.edit_message_text = AsyncMock()
-        mock_update.callback_query = mock_query
-        mock_update.effective_user = Mock(id=12345)
-
-        mock_context = Mock()
-
-        result = await time_selected(mock_update, mock_context)
-
-        # Should call delete_booking_session
-        mock_delete.assert_called_once_with(12345)
-
-        # Should end conversation
-        from telegram.ext import ConversationHandler
-
-        assert result == ConversationHandler.END
-
-    @pytest.mark.asyncio
-    @patch("src.commands.booking.get_booking_session", return_value=None)
-    @patch("src.commands.booking.delete_booking_session")
-    async def test_cancel_from_button(self, mock_delete, mock_get_session):
-        """Test cancel booking button handler"""
-        from src.commands.booking import cancel_booking_button
-
-        mock_update = Mock()
-        mock_query = AsyncMock()
-        mock_query.answer = AsyncMock()
-        mock_query.edit_message_text = AsyncMock()
-        mock_update.callback_query = mock_query
-        mock_update.effective_user = Mock(id=12345)
-
-        mock_context = Mock()
-        mock_context.user_data = {"test": "data"}
-
-        result = await cancel_booking_button(mock_update, mock_context)
-
-        # Should delete session and clear user data
-        mock_delete.assert_called_once_with(12345)
-        assert len(mock_context.user_data) == 0
-
-        # Should end conversation
-        from telegram.ext import ConversationHandler
-
-        assert result == ConversationHandler.END
-
-
-class TestBookingErrorHandling:
-    """Tests for booking error scenarios"""
-
-    @pytest.mark.asyncio
-    @patch("src.commands.booking.get_booking_session")
-    async def test_session_expired_during_booking(self, mock_get_session):
-        """Test handling of expired session during booking"""
-        from src.commands.booking import time_selected
-
-        # Session doesn't exist (expired or cleared)
-        mock_get_session.return_value = None
-
-        mock_update = Mock()
-        mock_query = AsyncMock()
-        mock_query.data = "time_1234567890"
-        mock_query.answer = AsyncMock()
-        mock_query.edit_message_text = AsyncMock()
-        mock_update.callback_query = mock_query
-        mock_update.effective_user = Mock(id=12345)
-
-        mock_context = Mock()
-
-        result = await time_selected(mock_update, mock_context)
-
-        # Should end conversation
-        from telegram.ext import ConversationHandler
-
-        assert result == ConversationHandler.END
-
-        # Should show error message
-        mock_query.edit_message_text.assert_called_once()
-        call_args = mock_query.edit_message_text.call_args[0][0]
-        assert "expired" in call_args.lower() or "cleared" in call_args.lower()
-
-    def test_booking_callback_pattern_validation(self):
-        """Test callback data pattern matching"""
-        import re
-
-        # Pattern from ConversationHandler entry_points
-        pattern = r"^book_\d{4}-\d{2}-\d{2}_\d+_\d+$"
-
-        valid_callbacks = [
-            "book_2025-01-15_200_100",
-            "book_2024-12-31_10461_10339028",
-            "book_2025-06-01_1_1",
-        ]
-
-        for callback in valid_callbacks:
-            assert re.match(pattern, callback) is not None
-
-        invalid_callbacks = [
-            "book_2025-1-15_200_100",  # Single digit month
-            "book_2025-01-15_200",  # Missing service_id
-            "subscribe_2025-01-15_200_100",  # Wrong prefix
-            "book_15-01-2025_200_100",  # Wrong date format
-        ]
-
-        for callback in invalid_callbacks:
-            assert re.match(pattern, callback) is None
-
-
-class TestBookingCompletion:
-    """Tests for booking completion scenarios"""
-
-    @pytest.mark.asyncio
-    @patch("src.commands.booking.book_appointment_complete")
-    @patch("src.commands.booking.get_booking_session")
-    @patch("src.commands.booking.delete_booking_session")
-    async def test_successful_booking(
-        self, mock_delete, mock_get_session, mock_book_complete
+    async def test_use_saved_contact_books_with_it(
+        self, db, user, context, bot, monkeypatch
     ):
-        """Test successful booking flow completion"""
-        from src.commands.booking import confirm_booking
-        from src.db_models import BookingSession
+        save_contact(db)
+        open_session(db, "CONFIRMING", timestamp=SLOT_TS)
+        calls = []
 
-        # Mock successful booking
-        mock_book_complete.return_value = {"processId": "ABC123", "status": "success"}
+        async def book_appointment(**kwargs):
+            calls.append(kwargs)
+            return {"processId": "P-1"}
 
-        # Mock booking session
-        mock_session = BookingSession(
-            user_id=12345,
-            state="CONFIRMING",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token123",
-            expires_at=datetime.utcnow() + timedelta(minutes=15),
-            timestamp=1234567890,
-            name="John Doe",
-            email="john@example.com",
-        )
-        mock_get_session.return_value = mock_session
+        monkeypatch.setattr(booking.booking_api, "book_appointment", book_appointment)
 
-        mock_update = Mock()
-        mock_query = AsyncMock()
-        mock_query.data = "confirm_booking"
-        mock_query.answer = AsyncMock()
-        mock_query.edit_message_text = AsyncMock()
-        mock_update.callback_query = mock_query
-        mock_update.effective_user = Mock(id=12345)
+        state = await press(booking.confirm, context, "b1:me")
+        assert bot.edits[-1].text == t("booking.processing", "en")
+        await context.drain()
 
-        mock_context = Mock()
-        mock_context.user_data = {}
+        assert state == ("stop", ConversationHandler.END)
+        assert [(c["family_name"], c["email"]) for c in calls] == [(NAME, EMAIL)]
+        assert session_row(db) is None
 
-        result = await confirm_booking(mock_update, mock_context)
-
-        # Should delete session after completion
-        mock_delete.assert_called_once_with(12345)
-
-        # Should end conversation
-        from telegram.ext import ConversationHandler
-
-        assert result == ConversationHandler.END
-
-        # Should show success message
-        mock_query.edit_message_text.assert_called()
-        call_args = mock_query.edit_message_text.call_args[0][0]
-        assert "success" in call_args.lower() or "🎉" in call_args
-
-    @pytest.mark.asyncio
-    @patch("src.commands.booking.book_appointment_complete")
-    @patch("src.commands.booking.get_booking_session")
-    @patch("src.commands.booking.delete_booking_session")
-    async def test_failed_booking(
-        self, mock_delete, mock_get_session, mock_book_complete
+    async def test_use_saved_contact_after_it_was_forgotten_asks_for_the_name(
+        self, db, user, context, bot
     ):
-        """Test failed booking scenario"""
-        from src.commands.booking import confirm_booking
-        from src.db_models import BookingSession
+        open_session(db, "CONFIRMING", timestamp=SLOT_TS)
 
-        # Mock failed booking
-        mock_book_complete.return_value = None
+        state = await press(booking.confirm, context, "b1:me")
 
-        # Mock booking session
-        mock_session = BookingSession(
-            user_id=12345,
-            state="CONFIRMING",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token123",
-            expires_at=datetime.utcnow() + timedelta(minutes=15),
-            timestamp=1234567890,
-            name="John Doe",
-            email="john@example.com",
+        assert state == ("stop", booking.ASKING_NAME)
+        assert bot.edits[-1].text == t(
+            "booking.ask_name", "en", time="Thu 29.10, 09:30"
         )
-        mock_get_session.return_value = mock_session
 
-        mock_update = Mock()
-        mock_query = AsyncMock()
-        mock_query.data = "confirm_booking"
-        mock_query.answer = AsyncMock()
-        mock_query.edit_message_text = AsyncMock()
-        mock_update.callback_query = mock_query
-        mock_update.effective_user = Mock(id=12345)
 
-        mock_context = Mock()
-        mock_context.user_data = {}
+@pytest.mark.asyncio
+@STEPS
+class TestContactSteps:
+    async def test_invalid_name_is_asked_again(self, db, user, context, bot):
+        open_session(db, "ASKING_NAME", timestamp=SLOT_TS)
 
-        result = await confirm_booking(mock_update, mock_context)
+        state = await type_text(booking.name_received, context, "Ivan")
 
-        # Should still delete session
-        mock_delete.assert_called_once_with(12345)
+        assert state == ("stop", booking.ASKING_NAME)
+        assert [s.text for s in bot.sent] == [t("booking.name_not_full", "en")]
+        assert bot.calls_of("edit_message_reply_markup") == []
+        assert session_row(db)["name"] is None
 
-        # Should end conversation
-        from telegram.ext import ConversationHandler
+    async def test_name_moves_buttons_to_the_email_question(
+        self, db, user, context, bot
+    ):
+        open_session(db, "ASKING_NAME", timestamp=SLOT_TS)
 
-        assert result == ConversationHandler.END
+        state = await type_text(booking.name_received, context, "  <i>Ivan</i> Petrov ")
 
-        # Should show failure message
-        mock_query.edit_message_text.assert_called()
-        call_args = mock_query.edit_message_text.call_args[0][0]
-        assert "failed" in call_args.lower() or "❌" in call_args
+        assert state == ("stop", booking.ASKING_EMAIL)
+        [sent] = bot.sent
+        assert sent.text == t(
+            "booking.ask_email", "en", name="&lt;i&gt;Ivan&lt;/i&gt; Petrov"
+        )
+        assert buttons(sent.reply_markup) == [("❌ Cancel", "b1:x")]
+        [strip] = bot.calls_of("edit_message_reply_markup")
+        assert (strip.message_id, strip.reply_markup) == (MSG, None)
+        row = session_row(db)
+        assert (row["name"], row["state"], row["message_id"]) == (
+            "<i>Ivan</i> Petrov",
+            "ASKING_EMAIL",
+            NEXT_MSG,
+        )
+
+    async def test_invalid_email_is_asked_again(self, db, user, context, bot):
+        open_session(db, "ASKING_EMAIL", timestamp=SLOT_TS, name=NAME)
+
+        state = await type_text(booking.email_received, context, "not-an-email")
+
+        assert state == ("stop", booking.ASKING_EMAIL)
+        assert [s.text for s in bot.sent] == [t("booking.email_invalid", "en")]
+
+    async def test_email_shows_the_escaped_confirmation(self, db, user, context, bot):
+        open_session(db, "ASKING_EMAIL", timestamp=SLOT_TS, name="Ivan <Petrov>")
+
+        state = await type_text(booking.email_received, context, " Ivan@Example.com ")
+
+        assert state == ("stop", booking.CONFIRMING)
+        [sent] = bot.sent
+        assert sent.text == t(
+            "booking.confirm_summary",
+            "en",
+            time=LONG_TIME,
+            name="Ivan &lt;Petrov&gt;",
+            email="ivan@example.com",
+        )
+        assert sent.parse_mode == "HTML"
+        assert buttons(sent.reply_markup) == [
+            ("✅ Confirm booking", "b1:ok"),
+            ("❌ Cancel", "b1:x"),
+        ]
+        stripped = bot.calls_of("edit_message_reply_markup")
+        assert [c.message_id for c in stripped] == [MSG]
+        row = session_row(db)
+        assert (row["email"], row["state"], row["message_id"]) == (
+            "ivan@example.com",
+            "CONFIRMING",
+            NEXT_MSG,
+        )
+
+    @pytest.mark.parametrize(
+        "state_name", ["SELECTING_TIME", "ASKING_NAME", "CONFIRMING"]
+    )
+    async def test_cancel_deletes_the_session_and_keeps_user_data(
+        self, db, user, context, bot, state_name
+    ):
+        open_session(db, state_name, timestamp=SLOT_TS)
+
+        state = await press(booking.cancel, context, "b1:x")
+
+        assert state == ("stop", ConversationHandler.END)
+        assert bot.edits[-1].text == t("booking.cancelled", "en")
+        assert bot.edits[-1].reply_markup is None
+        assert session_row(db) is None
+        assert context.user_data == {"lang": "en", "await_date": {"kind": "before"}}
+
+    async def test_button_of_an_older_booking_message_is_only_stripped(
+        self, db, user, context, bot
+    ):
+        open_session(
+            db, "ASKING_EMAIL", message_id=NEXT_MSG, timestamp=SLOT_TS, name=NAME
+        )
+
+        state = await press(booking.cancel, context, "b1:x", message_id=MSG)
+
+        assert state == ("stop", None)
+        stripped = bot.calls_of("edit_message_reply_markup")
+        assert [c.message_id for c in stripped] == [MSG]
+        assert bot.edits == []
+        assert session_row(db) is not None
+
+
+@pytest.mark.asyncio
+@STEPS
+class TestStepsWithoutSession:
+    @pytest.mark.parametrize("expires_in", [None, -1])
+    async def test_text_ends_the_conversation_without_stopping(
+        self, db, user, context, bot, expires_in
+    ):
+        if expires_in is not None:
+            open_session(db, "ASKING_NAME", timestamp=SLOT_TS, expires_in=expires_in)
+
+        state = await type_text(booking.name_received, context, NAME)
+
+        assert state == ConversationHandler.END
+        assert bot.calls == []
+
+    @pytest.mark.parametrize(
+        ("handler", "data"),
+        [
+            ("time_selected", f"b1:t:{OFFICE}:{SLOT_TS}"),
+            ("confirm", "b1:ok"),
+            ("change_contact", "b1:chg"),
+            ("cancel", "b1:x"),
+        ],
+    )
+    async def test_buttons_end_the_conversation_without_stopping(
+        self, db, user, context, bot, handler, data
+    ):
+        state = await press(getattr(booking, handler), context, data)
+
+        assert state == ConversationHandler.END
+        assert bot.calls == []
+
+    async def test_leaving_replaces_the_question_with_cancelled(
+        self, db, user, context, bot
+    ):
+        open_session(db, "ASKING_NAME", timestamp=SLOT_TS)
+
+        state = await type_text(booking.leave_booking, context, "/watches")
+
+        assert state == ConversationHandler.END
+        [ended] = bot.edits
+        assert (ended.message_id, ended.text, ended.reply_markup) == (
+            MSG,
+            t("booking.cancelled", "en"),
+            None,
+        )
+        assert session_row(db) is None
+        assert context.user_data == {"lang": "en", "await_date": {"kind": "before"}}
+
+
+# The conversation registered in a real Application, with recording group-1 handlers
+
+
+@pytest_asyncio.fixture
+async def app(db, user, catalog, clock, today, fake_availability):
+    application = Application.builder().bot(FakeBot()).updater(None).build()
+    seen: list[tuple[str, str]] = []
+
+    def recorder(kind):
+        async def record(update, context):
+            if update.callback_query is not None:
+                seen.append((kind, update.callback_query.data))
+            else:
+                seen.append((kind, update.message.text))
+
+        return record
+
+    application.add_handler(booking.build_booking_conversation(), group=0)
+    for handler in (
+        CallbackQueryHandler(recorder("nav"), pattern=NAV_RE),
+        CallbackQueryHandler(
+            booking.booking_orphan_callback,
+            pattern=f"{BOOK_RE}|{UNVERSIONED_BOOKING_RE}",
+        ),
+        MessageHandler(filters.COMMAND, recorder("command")),
+        MessageHandler(MENU_FILTER, recorder("menu")),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, recorder("text")),
+    ):
+        application.add_handler(handler, group=1)
+    application.bot_data["seen"] = seen
+    application.bot_data["availability"] = fake_availability
+    await application.initialize()
+    await application.start()
+    yield application
+    await application.stop()
+    await application.shutdown()
+
+
+def seen(application):
+    return application.bot_data["seen"]
+
+
+async def settle() -> None:
+    """Wait for the user's background task started by the last update"""
+    await asyncio.sleep(0)
+    async with user_lock(USER):
+        pass
+
+
+async def send(application, update) -> None:
+    await application.process_update(update)
+    await settle()
+
+
+def callback(application, data, message_id=MSG):
+    return make_callback_update(data, USER, message_id, bot=application.bot)
+
+
+def text(application, value):
+    return make_text_update(value, USER, bot=application.bot, message_id=77)
+
+
+async def start_booking_until_time(application, db) -> None:
+    with Session(db) as session:
+        watches = WatchRepository(session)
+        rec, _ = watches.create_or_update(USER, SERVICE, None, PRESETS["asap"])
+        watches.set_live_alert(
+            rec.id, USER, MSG, "slots", frozenset(), frozenset(), "h"
+        )
+    application.bot_data["availability"].day_results = [(SlotTime(SLOT_TS, OFFICE),)]
+    await send(application, callback(application, f"b1:{rec.id}:20261029"))
+    await send(application, callback(application, f"b1:t:{OFFICE}:{SLOT_TS}"))
+
+
+async def start_booking_until_name(application, db) -> None:
+    await start_booking_until_time(application, db)
+    assert session_row(db)["state"] == "ASKING_NAME"
+
+
+@pytest.mark.asyncio
+class TestRegisteredConversation:
+    async def test_typed_name_is_not_searched(self, app, db):
+        await start_booking_until_name(app, db)
+
+        await send(app, text(app, NAME))
+
+        assert seen(app) == []
+        assert session_row(db)["name"] == NAME
+
+    @pytest.mark.parametrize(
+        ("update_kind", "value"),
+        [
+            ("menu", "👀 My watches"),
+            ("menu", "👀 Мои поиски"),
+            ("command", "/watches"),
+            ("nav", "w1:list"),
+            ("nav", "s1:home"),
+            ("nav", "lang:ru"),
+        ],
+    )
+    async def test_navigation_ends_booking_and_reaches_group_1(
+        self, app, db, update_kind, value
+    ):
+        await start_booking_until_name(app, db)
+
+        update = callback(app, value, 900) if update_kind == "nav" else text(app, value)
+        await send(app, update)
+
+        assert seen(app) == [(update_kind, value)]
+        assert session_row(db) is None
+        ended = [e for e in app.bot.edits if e.message_id == MSG][-1]
+        assert (ended.text, ended.reply_markup) == (t("booking.cancelled", "en"), None)
+
+        await send(app, text(app, "passport"))
+        assert seen(app)[-1] == ("text", "passport")
+
+    async def test_date_prompt_during_booking_gets_the_typed_date(self, app, db):
+        await start_booking_until_name(app, db)
+
+        await send(app, callback(app, f"f1:date:{SERVICE}:0:b", 900))
+        await send(app, text(app, "15.11"))
+
+        assert seen(app) == [("nav", f"f1:date:{SERVICE}:0:b"), ("text", "15.11")]
+        assert session_row(db) is None
+
+    async def test_text_after_the_session_expired_is_searched(self, app, db, clock):
+        await start_booking_until_name(app, db)
+        clock.now += timedelta(minutes=16)
+
+        await send(app, text(app, "passport"))
+        await send(app, callback(app, "b1:x"))
+
+        assert seen(app) == [("text", "passport")]
+        assert app.bot.edits[-1].text == t("booking.session_cleared", "en")
+
+    async def test_cancel_keeps_language_and_pending_input(self, app, db):
+        app.user_data[USER]["await_date"] = {"kind": "range"}
+        await start_booking_until_name(app, db)
+
+        await send(app, callback(app, "b1:x"))
+
+        assert seen(app) == []
+        assert app.user_data[USER]["lang"] == "en"
+        assert app.user_data[USER]["await_date"] == {"kind": "range"}
+        assert app.bot.edits[-1].text == t("booking.cancelled", "en")
+
+    async def test_button_without_conversation_or_session_is_cleared(self, app, db):
+        await send(app, callback(app, f"b1:t:{OFFICE}:{SLOT_TS}"))
+
+        assert seen(app) == []
+        assert app.bot.edits[-1].text == t("booking.session_cleared", "en")
+
+    async def test_repeated_time_button_keeps_the_booking(self, app, db):
+        await start_booking_until_name(app, db)
+
+        await send(app, callback(app, f"b1:t:{OFFICE}:{SLOT_TS}"))
+
+        assert session_row(db)["state"] == "ASKING_NAME"
+        assert app.bot.edits[-1].text == t(
+            "booking.ask_name", "en", time="Thu 29.10, 09:30"
+        )
+        await send(app, text(app, NAME))
+        assert seen(app) == []
+        assert session_row(db)["name"] == NAME
+
+    async def test_repeated_confirm_keeps_the_running_booking(
+        self, app, db, monkeypatch
+    ):
+        save_contact(db)
+        await start_booking_until_time(app, db)
+        assert session_row(db)["state"] == "CONFIRMING"
+        release = asyncio.Event()
+
+        async def book_appointment(**kwargs):
+            await release.wait()
+            return {"processId": "P-1"}
+
+        monkeypatch.setattr(booking.booking_api, "book_appointment", book_appointment)
+
+        await app.process_update(callback(app, "b1:me"))
+        await asyncio.sleep(0)
+        await app.process_update(callback(app, "b1:me"))
+        during = session_row(db)
+        release.set()
+        await settle()
+
+        assert during is not None
+        assert t("booking.session_cleared", "en") not in [e.text for e in app.bot.edits]
+        assert app.bot.edits[-1].text.startswith(
+            t(
+                "booking.success",
+                "en",
+                process_id="P-1",
+                time=LONG_TIME,
+                name=NAME,
+                email=EMAIL,
+            )
+        )
+        assert session_row(db) is None

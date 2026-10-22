@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "requests>=2.34.2",
-    "python-telegram-bot>=22.8",
+    "python-telegram-bot[rate-limiter]>=22.8",
     "python-dotenv>=1.2.4",
     # Configuration & Validation
     "pydantic>=2.14.1",

@@ -1,32 +1,34 @@
-"""
-/help command - Comprehensive help documentation
-"""
-
-import logging
+# ABOUTME: /help and the reply keyboard's Help button: how the bot works and its commands.
+# ABOUTME: Shown as a navigation screen with shortcuts to Find and My watches.
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from src.handlers import text_input
 from src.i18n import t
 from src.i18n.user_language import get_user_language
+from src.ui import callbacks as cb
+from src.ui.screens import show_screen
 
-logger = logging.getLogger(__name__)
+
+def build_help_screen(lang: str) -> tuple[str, InlineKeyboardMarkup]:
+    markup = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("keyboard.find", lang), callback_data=cb.find_home()
+                ),
+                InlineKeyboardButton(
+                    t("keyboard.watches", lang), callback_data=cb.watches_list()
+                ),
+            ]
+        ]
+    )
+    return t("help.text", lang, find=t("keyboard.find", lang)), markup
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show comprehensive help information"""
+    text_input.clear_pending_input(context)
     lang = get_user_language(update.effective_user.id, context)
-    help_text = t("help.text", lang)
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                t("common.btn_main_menu", lang), callback_data="main_menu"
-            )
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        help_text, reply_markup=reply_markup, parse_mode="HTML"
-    )
+    text, markup = build_help_screen(lang)
+    await show_screen(update, context, text, markup)

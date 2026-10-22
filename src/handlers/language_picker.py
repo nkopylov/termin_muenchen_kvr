@@ -5,6 +5,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from src.i18n import DEFAULT_LANGUAGE, t
+from src.ui.screens import send_screen
 
 RUSSIAN_LIKELY_CODES = ("ru", "uk", "be", "kk")
 
@@ -12,6 +13,12 @@ RUSSIAN_LIKELY_CODES = ("ru", "uk", "be", "kk")
 def language_order(telegram_language_code: str | None) -> tuple[str, str]:
     base = (telegram_language_code or "").lower().split("-")[0]
     return ("ru", "en") if base in RUSSIAN_LIKELY_CODES else ("en", "ru")
+
+
+def client_language(update: Update) -> str:
+    """Language for someone without a stored choice: their Telegram client's."""
+    user = update.effective_user
+    return language_order(user.language_code if user else None)[0]
 
 
 def build_language_picker(
@@ -32,8 +39,8 @@ def build_language_picker(
 async def send_language_picker(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Send the picker as a new message in the update's chat."""
+    """Send the picker as the new nav message in the update's chat."""
     text, markup = build_language_picker(update.effective_user.language_code)
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, text=text, reply_markup=markup
+    await send_screen(
+        context.bot, update.effective_user.id, update.effective_chat.id, text, markup
     )

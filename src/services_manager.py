@@ -3,13 +3,18 @@ Service catalog manager for Munich appointment services.
 Fetches and caches service categories and information.
 """
 
+import functools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
+from typing import TypeVar
 
 from src.i18n import t
 from src.munich_api_client import get_api_client
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R")
 
 # Category definitions keyed by stable id; labels are i18n keys "categories.<id>"
 OTHER_CATEGORY = "sonstiges"
@@ -55,18 +60,6 @@ _services_cache = None
 _full_payload_cache = None
 
 
-def fetch_services() -> list[dict] | None:
-    """Fetch all available services from API"""
-    services = get_full_payload().get("services", [])
-
-    if services:
-        logger.info(f"Fetched {len(services)} services from API")
-        return services
-    else:
-        logger.error("Failed to fetch services")
-        return None
-
-
 def fetch_full_payload() -> dict | None:
     """
     Fetch the complete offices-and-services payload.
@@ -86,19 +79,51 @@ def fetch_full_payload() -> dict | None:
         return None
 
 
+def refresh_catalog() -> bool:
+    """Re-fetch the catalog; caches are replaced only when the fetch returned services"""
+    global _services_cache, _full_payload_cache
+    payload = fetch_full_payload()
+    if not payload or not payload.get("services"):
+        logger.warning("Catalog refresh failed, keeping the cached catalog")
+        return False
+    _full_payload_cache = payload
+    _services_cache = payload["services"]
+    logger.info(f"Catalog refreshed: {len(_services_cache)} services")
+    return True
+
+
+def catalog_loaded() -> bool:
+    return bool(_services_cache) and bool(get_full_payload().get("relations"))
+
+
+def per_catalog(fn: Callable[..., R]) -> Callable[..., R]:
+    """Memoizes fn by its positional arguments until the cached catalog is replaced.
+    Results are shared between callers, so they must not be mutated."""
+    memo: dict[tuple, R] = {}
+    source: tuple = (None, None)
+
+    @functools.wraps(fn)
+    def wrapper(*args) -> R:
+        nonlocal source
+        current = (_full_payload_cache, _services_cache)
+        if current[0] is not source[0] or current[1] is not source[1]:
+            memo.clear()
+            source = current
+        if args not in memo:
+            memo[args] = fn(*args)
+        return memo[args]
+
+    return wrapper
+
+
 def get_services() -> list[dict]:
-    """Get services (cached)"""
-    global _services_cache
-    if _services_cache is None:
-        _services_cache = fetch_services()
+    """Cached services; empty until refresh_catalog has succeeded (never fetches, since
+    callers run on the event loop)"""
     return _services_cache or []
 
 
 def get_full_payload() -> dict:
-    """Get full payload (cached)"""
-    global _full_payload_cache
-    if _full_payload_cache is None:
-        _full_payload_cache = fetch_full_payload()
+    """Cached catalog; empty until refresh_catalog has succeeded (never fetches)"""
     return _full_payload_cache or {"offices": [], "services": [], "relations": []}
 
 
@@ -196,7 +221,7 @@ def get_office_name(office_id: int, lang: str | None = None) -> str:
     if lang is None:
         fallback = f"Office {office_id}"
     else:
-        fallback = t("buttons.office_fallback", lang, office_id=office_id)
+        fallback = t("watch.office_fallback", lang, office_id=office_id)
     payload = get_full_payload()
     for office in payload.get("offices", []):
         if office["id"] == office_id:

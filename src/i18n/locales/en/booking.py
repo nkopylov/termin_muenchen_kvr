@@ -5,30 +5,28 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "booking.fetching_slots": (
         "📅 Selected date: {date}\n\nFetching available time slots..."
     ),
-    "booking.captcha_expired": (
-        "❌ Error: Captcha token expired. "
-        "Please try again from the appointment notification."
-    ),
-    "booking.no_slots_found": (
-        "❌ No available time slots found for {date}.\n"
-        "They may have been booked already. Please try another date."
-    ),
-    "booking.no_slots": "❌ No time slots available for {date}.",
     "booking.select_time": (
         "📅 Available time slots for {date}:\n\nPlease select a time:"
     ),
     "booking.invalid_data": "❌ Invalid booking data. Please try again.",
+    "booking.watch_ended": "This watch has ended. Start a new search with 🔎 Find a Termin.",
+    "booking.day_gone": "😕 No free times left on {date}.",
+    "booking.times_failed": "⚠️ I couldn't load the times for {date} right now.",
+    "booking.will_send_days": "I'll keep watching and send you the updated free days.",
+    "booking.use_saved": (
+        "🕐 {time}\n📍 {office}\n\nBook with your saved details?\n👤 {name}\n📧 {email}"
+    ),
+    "booking.btn_yes_book": "✅ Yes, book it",
+    "booking.btn_change": "✏️ Enter other details",
     "booking.btn_cancel": "❌ Cancel",
-    "booking.btn_cancel_booking": "❌ Cancel Booking",
-    "booking.btn_confirm": "✅ Confirm Booking",
+    "booking.btn_confirm": "✅ Confirm booking",
     "booking.cancelled": "❌ Booking cancelled.",
     "booking.session_cleared": (
         "❌ Your booking session expired or was cleared.\n\n"
-        "Please start a new booking from an appointment notification."
+        "Please start a new booking from a Free slots message."
     ),
-    "booking.session_expired": "❌ Session expired. Please start again.",
-    "booking.time_on_date": "{time} on {date}",
-    "booking.time_on_long_date": "{time} on {weekday}, {month} {day:02d}, {year}",
+    "booking.time_on_date": "{date}, {time}",
+    "booking.time_on_long_date": "{time} on {weekday}, {month} {day}, {year}",
     "booking.weekday_0": "Monday",
     "booking.weekday_1": "Tuesday",
     "booking.weekday_2": "Wednesday",
@@ -74,28 +72,30 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     ),
     "booking.processing": "⏳ Processing your booking...\nThis may take a few seconds.",
     "booking.success": (
-        "🎉 <b>Booking Successful!</b> 🎉\n\n"
+        "🎉 <b>Booking successful!</b> 🎉\n\n"
         "📋 Booking ID: {process_id}\n"
         "🕐 Time: {time}\n"
         "👤 Name: {name}\n"
         "📧 Email: {email}\n\n"
         "<b>⚠️ IMPORTANT - Next Steps:</b>\n\n"
         "1. Check your email inbox at <b>{email}</b>\n"
-        "2. Look for a confirmation email from Munich Ausländerbehörde\n"
+        "2. Look for a confirmation email from the City of Munich "
+        "(Landeshauptstadt München)\n"
         "3. <b>Click the confirmation link</b> in that email\n"
         "4. Your appointment will only be finalized after email confirmation\n\n"
         "If you don't see the email within 5 minutes, check your spam folder."
     ),
     "booking.failed": (
-        "❌ <b>Booking Failed</b>\n\n"
+        "❌ <b>Booking failed</b>\n\n"
         "The appointment could not be booked. Possible reasons:\n"
         "• The slot was just taken by someone else\n"
-        "• Network error occurred\n"
-        "• Captcha token expired\n\n"
+        "• The city website did not respond\n\n"
         "Please try booking another available slot."
     ),
+    "booking.watch_finished": "✅ I've stopped watching {service} for you.",
+    "booking.will_update": "I'll keep watching and send you the current free slots.",
     "booking.error": (
-        "❌ An error occurred while booking:\n{error}\n\n"
-        "Please try again or contact support."
+        "❌ Something went wrong while booking.\n\n"
+        "Please try again or choose another free slot."
     ),
 }

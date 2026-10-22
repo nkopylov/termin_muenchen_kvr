@@ -1,0 +1,62 @@
+# ABOUTME: English labels describing a watch: popular service names, office, time, state, dates.
+# ABOUTME: Keys are "watch.<name>".
+
+MESSAGES: dict[str, str | dict[str, str]] = {
+    "watch.svc_10339028": "Residence permit, urgent: work & family",
+    "watch.svc_10339027": "Residence permit, urgent: students",
+    "watch.svc_10502137": "Residence card (eAT) pickup",
+    "watch.svc_1063475": "Address registration (Anmeldung)",
+    "watch.svc_1063441": "ID card (Personalausweis)",
+    "watch.svc_1063453": "Passport (Reisepass)",
+    "watch.svc_1071896": "Foreign driving licence exchange",
+    "watch.svc_1064305": "Car deregistration",
+    "watch.service_fallback": "Service {service_id}",
+    "watch.office_fallback": "Office {office_id}",
+    "watch.where_any": "Any office",
+    "watch.when_asap": "as soon as possible",
+    "watch.when_2w": "within 2 weeks",
+    "watch.when_1m": "within 1 month",
+    "watch.when_3m": "within 3 months",
+    "watch.when_within": {
+        "one": "within {count} day",
+        "other": "within {count} days",
+    },
+    "watch.when_before": "before {date}",
+    "watch.when_between": "{start} – {end}",
+    "watch.wd_0": "Mon",
+    "watch.wd_1": "Tue",
+    "watch.wd_2": "Wed",
+    "watch.wd_3": "Thu",
+    "watch.wd_4": "Fri",
+    "watch.wd_5": "Sat",
+    "watch.wd_6": "Sun",
+    "watch.day": "{weekday} {date}",
+    "watch.ago_now": "just now",
+    "watch.ago_minutes": {
+        "one": "{count} min ago",
+        "other": "{count} min ago",
+    },
+    "watch.ago_hours": {
+        "one": "{count} hour ago",
+        "other": "{count} hours ago",
+    },
+    "watch.ago_days": {
+        "one": "{count} day ago",
+        "other": "{count} days ago",
+    },
+    "watch.state_not_checked": "not checked yet",
+    "watch.state_none": "no free slots yet",
+    "watch.state_slots": {
+        "one": "{count} free day, earliest {day}",
+        "other": "{count} free days, earliest {day}",
+    },
+    "watch.state_paused": "paused",
+    "watch.state_booked": "booked ✅",
+    "watch.state_deadline": "ended: the date has passed",
+    "watch.state_gone": "ended: office no longer available",
+    "watch.state_stopped": "stopped",
+    "watch.resumed": {
+        "one": "Welcome back! I resumed {count} watch.",
+        "other": "Welcome back! I resumed {count} watches.",
+    },
+}
