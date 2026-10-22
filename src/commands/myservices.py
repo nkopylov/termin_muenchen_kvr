@@ -3,12 +3,15 @@
 """
 
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from src.database import get_session
+from src.i18n import t
+from src.i18n.user_language import get_user_language
 from src.repositories import SubscriptionRepository
-from src.services_manager import get_service_info, get_office_name
+from src.services_manager import get_office_name, get_service_info
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,7 @@ async def myservices_command(
 ) -> None:
     """Show user's active subscriptions"""
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
 
     with get_session() as session:
         sub_repo = SubscriptionRepository(session)
@@ -27,31 +31,43 @@ async def myservices_command(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "📋 Subscribe to available Termins", callback_data="main_menu"
+                    t("menu.btn_subscribe", lang), callback_data="main_menu"
                 )
             ],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
+            [
+                InlineKeyboardButton(
+                    t("common.btn_main_menu", lang), callback_data="main_menu"
+                )
+            ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📋 <b>No Subscriptions</b>\n\nYou haven't subscribed to any services yet.\nUse /subscribe to start monitoring appointment availability!",
+            t("myservices.empty", lang),
             reply_markup=reply_markup,
             parse_mode="HTML",
         )
         return
 
-    message = "📋 <b>Your Subscriptions</b>\n\nYou are monitoring these services:\n\n"
+    message = t("myservices.header", lang)
 
     for sub in subscriptions:
         service_info = get_service_info(sub["service_id"])
         if service_info:
             office_id = sub.get("office_id")
-            office_name = get_office_name(office_id) if office_id else "Unknown Office"
-            message += f"• <b>{service_info['name']}</b>\n"
-            message += f"   📍 {office_name}\n"
-            message += f"   📅 Subscribed: {sub['subscribed_at'][:10]}\n\n"
+            office_name = (
+                get_office_name(office_id)
+                if office_id
+                else t("myservices.unknown_office", lang)
+            )
+            message += t(
+                "myservices.item",
+                lang,
+                service=service_info["name"],
+                office=office_name,
+                date=sub["subscribed_at"][:10],
+            )
 
-    message += f"<b>Total:</b> {len(subscriptions)} subscription(s)"
+    message += t("myservices.total", lang, count=len(subscriptions))
 
     # Add unsubscribe buttons
     keyboard = []
@@ -72,13 +88,28 @@ async def myservices_command(
 
     # Add navigation buttons
     keyboard.append(
-        [InlineKeyboardButton("📋 Subscribe to More", callback_data="subscribe")]
+        [
+            InlineKeyboardButton(
+                t("myservices.btn_subscribe_more", lang), callback_data="subscribe"
+            )
+        ]
     )
     if len(subscriptions) > 0:
         keyboard.append(
-            [InlineKeyboardButton("🗑 Unsubscribe from All", callback_data="unsub_all")]
+            [
+                InlineKeyboardButton(
+                    t("myservices.btn_unsubscribe_all", lang),
+                    callback_data="unsub_all",
+                )
+            ]
         )
-    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                t("common.btn_main_menu", lang), callback_data="main_menu"
+            )
+        ]
+    )
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(

@@ -6,18 +6,21 @@ Handles both initial notifications and progressive updates with time slots.
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 
-from src.termin_tracker import get_available_slots
-from src.services.queue_manager import is_user_in_queue
 from src.config import get_config
+from src.i18n import t
+from src.i18n.user_language import get_user_language
 from src.services.analytics_service import track_event
+from src.services.queue_manager import is_user_in_queue
+from src.termin_tracker import get_available_slots
 
 logger = logging.getLogger(__name__)
 
 
-def format_available_appointments(data) -> str:
+def format_available_appointments(data, lang: str = "en") -> str:
     """Format available appointments data for display"""
     if not data:
         return ""
@@ -43,7 +46,7 @@ def format_available_appointments(data) -> str:
             # Show remaining days count
             remaining = len(available_days) - len(slots_by_date)
             if remaining > 0:
-                result += f"... and {remaining} more days\n"
+                result += t("notify.more_days", lang, count=remaining) + "\n"
 
         return result.strip()
 
@@ -52,10 +55,12 @@ def format_available_appointments(data) -> str:
         available_days = data["availableDays"]
         if available_days:
             for day in available_days[:5]:
-                date = day.get("date", "Unknown date")
+                date = day.get("date", t("notify.unknown_date", lang))
                 result += f"📅 {date}\n"
             if len(available_days) > 5:
-                result += f"... and {len(available_days) - 5} more days\n"
+                result += (
+                    t("notify.more_days", lang, count=len(available_days) - 5) + "\n"
+                )
         return result.strip()
 
     # Legacy format handling
@@ -65,12 +70,14 @@ def format_available_appointments(data) -> str:
                 # Handle times as list of strings or list of dicts
                 if isinstance(times, list):
                     time_strs = []
-                    for t in times[:3]:
-                        if isinstance(t, dict):
+                    for entry in times[:3]:
+                        if isinstance(entry, dict):
                             # Extract time from dict (e.g., {'time': '09:00', ...})
-                            time_strs.append(str(t.get("time", t.get("slot", str(t)))))
+                            time_strs.append(
+                                str(entry.get("time", entry.get("slot", str(entry))))
+                            )
                         else:
-                            time_strs.append(str(t))
+                            time_strs.append(str(entry))
                     result += f"📅 {date}: {', '.join(time_strs)}\n"
                 else:
                     result += f"📅 {date}: {times}\n"
@@ -82,6 +89,44 @@ def format_available_appointments(data) -> str:
                 result += f"📅 {item}\n"
 
     return result.strip()
+
+
+def _format_initial_dates(available_days: list[dict], lang: str) -> str:
+    """List the first 5 available dates, followed by how many more there are."""
+    dates = "\n".join([f"📅 {day.get('date')}" for day in available_days[:5]])
+    if len(available_days) > 5:
+        dates += "\n" + t("notify.more_days", lang, count=len(available_days) - 5)
+    return dates
+
+
+def _booking_keyboard(
+    available_days: list[dict],
+    office_id: int,
+    service_id: int,
+    booking_url: str,
+    lang: str,
+) -> InlineKeyboardMarkup | None:
+    """Booking buttons for each available date plus a link to the website."""
+    # Create inline keyboard with booking buttons for each available date
+    keyboard = []
+    for day_info in available_days[:5]:  # Show first 5 dates
+        date = day_info.get("date")
+        if date:
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        t("notify.btn_book_date", lang, date=date),
+                        callback_data=f"book_{date}_{office_id}_{service_id}",
+                    )
+                ]
+            )
+
+    # Add link to manual booking
+    keyboard.append(
+        [InlineKeyboardButton(t("notify.btn_book_manually", lang), url=booking_url)]
+    )
+
+    return InlineKeyboardMarkup(keyboard) if keyboard else None
 
 
 async def notify_users_of_appointment(
@@ -110,20 +155,9 @@ async def notify_users_of_appointment(
     available_days = data.get("availableDays", [])
 
     # STEP 1: Send immediate notification with dates only
-    initial_dates = "\n".join([f"📅 {day.get('date')}" for day in available_days[:5]])
-    if len(available_days) > 5:
-        initial_dates += f"\n... and {len(available_days) - 5} more days"
-
-    initial_message = (
-        "🎉 <b>APPOINTMENT AVAILABLE!</b> 🎉\n\n"
-        f"<b>{service_name}</b>\n\n"
-        f"Available appointments:\n{initial_dates}\n\n"
-        f"🔗 <a href='{booking_url}'>Book appointment now!</a>\n\n"
-        "⏳ Loading time slots..."
-    )
-
     # Send initial messages and store message IDs for updating
     message_ids = {}
+    user_languages: dict[int, str] = {}
     for user_id in user_ids:
         # Skip users currently in booking conversation
         if is_user_in_queue(user_id):
@@ -131,6 +165,16 @@ async def notify_users_of_appointment(
                 f"Skipping notification for user {user_id} - booking in progress"
             )
             continue
+
+        lang = get_user_language(user_id)
+        user_languages[user_id] = lang
+        initial_message = t(
+            "notify.initial",
+            lang,
+            service_name=service_name,
+            dates=_format_initial_dates(available_days, lang),
+            booking_url=booking_url,
+        )
 
         try:
             sent_msg = await application.bot.send_message(
@@ -149,7 +193,7 @@ async def notify_users_of_appointment(
                 service_id=service_id,
                 service_name=service_name,
                 notification_type="initial",
-                slots_count=len(available_days)
+                slots_count=len(available_days),
             )
         except Exception as e:
             error_str = str(e).lower()
@@ -163,7 +207,7 @@ async def notify_users_of_appointment(
                 await track_event(
                     "user_blocked_bot",
                     user_id=user_id,
-                    last_command_timestamp=datetime.utcnow().isoformat()
+                    last_command_timestamp=datetime.utcnow().isoformat(),
                 )
             elif "rate" in error_str or "too many requests" in error_str:
                 error_type = "rate_limit_exceeded"
@@ -175,7 +219,7 @@ async def notify_users_of_appointment(
                 "notification_failed",
                 user_id=user_id,
                 service_id=service_id,
-                error_type=error_type
+                error_type=error_type,
             )
 
     # STEP 2: Fetch time slots and build slots_by_date
@@ -219,48 +263,24 @@ async def notify_users_of_appointment(
     logger.info(f"📋 Slots by date: {slots_by_date}")
 
     # STEP 3: Update all messages with final time slot information
-    appointments_detail = format_available_appointments(data)
-
-    final_message = (
-        "🎉 <b>APPOINTMENT AVAILABLE!</b> 🎉\n\n" f"<b>{service_name}</b>\n\n"
-    )
-
-    if appointments_detail:
-        final_message += f"Available appointments:\n{appointments_detail}\n\n"
-    else:
-        final_message += f"Available appointments:\n{initial_dates}\n\n"
-
-    final_message += (
-        f"🔗 <a href='{booking_url}'>Book appointment now!</a>\n\n"
-        "⚡ Act fast - Appointments fill up quickly!"
-    )
-
-    # Create inline keyboard with booking buttons for each available date
-    keyboard = []
-    for day_info in available_days[:5]:  # Show first 5 dates
-        date = day_info.get("date")
-        if date:
-            keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        f"📅 Book: {date}",
-                        callback_data=f"book_{date}_{office_id}_{service_id}",
-                    )
-                ]
-            )
-
-    # Add link to manual booking
-    keyboard.append(
-        [InlineKeyboardButton("🔗 Book manually on website", url=booking_url)]
-    )
-
-    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-
     # Store captcha token in bot_data for booking flow
     application.bot_data["captcha_token"] = captcha_token
 
     # Update all messages with time slots and booking buttons
     for user_id, msg_id in message_ids.items():
+        lang = user_languages[user_id]
+        appointments_detail = format_available_appointments(data, lang)
+        final_message = t(
+            "notify.final",
+            lang,
+            service_name=service_name,
+            dates=appointments_detail or _format_initial_dates(available_days, lang),
+            booking_url=booking_url,
+        )
+        reply_markup = _booking_keyboard(
+            available_days, office_id, service_id, booking_url, lang
+        )
+
         try:
             await application.bot.edit_message_text(
                 chat_id=user_id,

@@ -14,6 +14,14 @@ from src.commands.booking import (
 )
 
 
+
+@pytest.fixture(autouse=True)
+def english_user():
+    """Booking handlers read the user's language from the DB; these tests run without one."""
+    with patch("src.commands.booking.get_user_language", return_value="en"):
+        yield
+
+
 class TestBookingSessionManagement:
     """Tests for booking session lifecycle management"""
 
@@ -267,8 +275,9 @@ class TestBookingCancellation:
     """Tests for booking cancellation flow"""
 
     @pytest.mark.asyncio
+    @patch("src.commands.booking.get_booking_session", return_value=None)
     @patch("src.commands.booking.delete_booking_session")
-    async def test_cancel_from_time_selection(self, mock_delete):
+    async def test_cancel_from_time_selection(self, mock_delete, mock_get_session):
         """Test canceling booking from time selection"""
         from src.commands.booking import time_selected
 
@@ -293,8 +302,9 @@ class TestBookingCancellation:
         assert result == ConversationHandler.END
 
     @pytest.mark.asyncio
+    @patch("src.commands.booking.get_booking_session", return_value=None)
     @patch("src.commands.booking.delete_booking_session")
-    async def test_cancel_from_button(self, mock_delete):
+    async def test_cancel_from_button(self, mock_delete, mock_get_session):
         """Test cancel booking button handler"""
         from src.commands.booking import cancel_booking_button
 

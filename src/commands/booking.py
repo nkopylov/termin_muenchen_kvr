@@ -6,25 +6,28 @@ Manages the multi-step booking process with user interaction
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
+    CallbackQueryHandler,
     ContextTypes,
     ConversationHandler,
-    CallbackQueryHandler,
     MessageHandler,
     filters,
 )
 
 from src.booking_api import book_appointment_complete
-from src.termin_tracker import get_available_slots
 from src.database import get_session
+from src.i18n import t
+from src.i18n.user_language import get_user_language
 from src.repositories import BookingSessionRepository
 from src.services.analytics_service import track_event
 from src.services.appointment_checker import (
-    increment_bookings_started,
     increment_bookings_completed,
+    increment_bookings_started,
 )
 from src.services_manager import get_service_info
+from src.termin_tracker import get_available_slots
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +110,29 @@ def get_booking_session(user_id: int):
         return booking_session
 
 
+def format_time_on_date(dt: datetime, lang: str) -> str:
+    """Slot time with its ISO date, e.g. "10:30 on 2025-01-15"."""
+    return t(
+        "booking.time_on_date",
+        lang,
+        time=dt.strftime("%H:%M"),
+        date=dt.strftime("%Y-%m-%d"),
+    )
+
+
+def format_time_on_long_date(dt: datetime, lang: str) -> str:
+    """Slot time with weekday and month names, e.g. "10:30 on Wednesday, January 15, 2025"."""
+    return t(
+        "booking.time_on_long_date",
+        lang,
+        time=dt.strftime("%H:%M"),
+        weekday=t(f"booking.weekday_{dt.weekday()}", lang),
+        month=t(f"booking.month_{dt.month}", lang),
+        day=dt.day,
+        year=dt.year,
+    )
+
+
 async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Start the booking process - show available dates
@@ -116,6 +142,7 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.answer()
 
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
 
     # Extract data from callback (format: "book_DATE_OFFICEID_SERVICEID")
     callback_data = query.data.split("_")
@@ -124,27 +151,20 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         office_id = int(callback_data[2])
         service_id = int(callback_data[3])
 
-        await query.edit_message_text(
-            f"📅 Selected date: {date}\n\n" f"Fetching available time slots..."
-        )
+        await query.edit_message_text(t("booking.fetching_slots", lang, date=date))
 
         # Fetch available time slots for this date
         captcha_token = context.bot_data.get("captcha_token")
         if not captcha_token:
             logger.warning(f"User {user_id} - captcha token expired")
-            await query.edit_message_text(
-                "❌ Error: Captcha token expired. Please try again from the appointment notification."
-            )
+            await query.edit_message_text(t("booking.captcha_expired", lang))
             return ConversationHandler.END
 
         slots_data = get_available_slots(date, office_id, service_id, captcha_token)
 
         if not slots_data or not slots_data.get("offices"):
             logger.info(f"User {user_id} - no slots available for {date}")
-            await query.edit_message_text(
-                f"❌ No available time slots found for {date}.\n"
-                f"They may have been booked already. Please try another date."
-            )
+            await query.edit_message_text(t("booking.no_slots_found", lang, date=date))
             return ConversationHandler.END
 
         # Extract appointments (timestamps)
@@ -156,7 +176,7 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
         if not appointments:
             logger.info(f"User {user_id} - no appointments available for {date}")
-            await query.edit_message_text(f"❌ No time slots available for {date}.")
+            await query.edit_message_text(t("booking.no_slots", lang, date=date))
             return ConversationHandler.END
 
         # Create booking session in DB
@@ -199,12 +219,16 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             )
 
         keyboard.append(
-            [InlineKeyboardButton("❌ Cancel", callback_data="cancel_booking")]
+            [
+                InlineKeyboardButton(
+                    t("booking.btn_cancel", lang), callback_data="cancel_booking"
+                )
+            ]
         )
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"📅 Available time slots for {date}:\n\n" f"Please select a time:",
+            t("booking.select_time", lang, date=date),
             reply_markup=reply_markup,
         )
 
@@ -212,7 +236,7 @@ async def start_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     else:
         logger.warning(f"User {user_id} - invalid booking data format")
-        await query.edit_message_text("❌ Invalid booking data. Please try again.")
+        await query.edit_message_text(t("booking.invalid_data", lang))
         return ConversationHandler.END
 
 
@@ -224,6 +248,7 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.answer()
 
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
 
     if query.data == "cancel_booking":
         booking_session = get_booking_session(user_id)
@@ -237,16 +262,13 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 reason="user_initiated",
             )
         delete_booking_session(user_id)
-        await query.edit_message_text("❌ Booking cancelled.")
+        await query.edit_message_text(t("booking.cancelled", lang))
         return ConversationHandler.END
 
     # Check if session still exists (bot might have restarted)
     booking_session = get_booking_session(user_id)
     if not booking_session:
-        await query.edit_message_text(
-            "❌ Your booking session expired or was cleared.\n\n"
-            "Please start a new booking from an appointment notification."
-        )
+        await query.edit_message_text(t("booking.session_cleared", lang))
         return ConversationHandler.END
 
     # Extract timestamp
@@ -264,16 +286,19 @@ async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         selected_time=dt.strftime("%H:%M"),
     )
 
-    time_str = dt.strftime("%H:%M on %Y-%m-%d")
+    time_str = format_time_on_date(dt, lang)
 
     keyboard = [
-        [InlineKeyboardButton("❌ Cancel Booking", callback_data="cancel_booking")]
+        [
+            InlineKeyboardButton(
+                t("booking.btn_cancel_booking", lang), callback_data="cancel_booking"
+            )
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"✅ Selected time: {time_str}\n\n"
-        f"Please enter your full name (as it appears on your documents):",
+        t("booking.ask_name", lang, time=time_str),
         reply_markup=reply_markup,
     )
 
@@ -285,21 +310,17 @@ async def name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     Received user's name - ask for email
     """
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
     name = update.message.text.strip()
 
     # Validate name has at least 2 words (first + last name)
     name_parts = name.split()
     if len(name_parts) < 2:
-        await update.message.reply_text(
-            "❌ Please enter your full name (first and last name).\n\n"
-            "Example: John Smith"
-        )
+        await update.message.reply_text(t("booking.name_not_full", lang))
         return ASKING_NAME
 
     if len(name) < 4:
-        await update.message.reply_text(
-            "❌ Name is too short. Please enter your full name:"
-        )
+        await update.message.reply_text(t("booking.name_too_short", lang))
         return ASKING_NAME
 
     # Update session with name
@@ -316,13 +337,16 @@ async def name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
 
     keyboard = [
-        [InlineKeyboardButton("❌ Cancel Booking", callback_data="cancel_booking")]
+        [
+            InlineKeyboardButton(
+                t("booking.btn_cancel_booking", lang), callback_data="cancel_booking"
+            )
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        f"✅ Name: {name}\n\n"
-        f"Please enter your email address (you'll receive a confirmation email):",
+        t("booking.ask_email", lang, name=name),
         reply_markup=reply_markup,
     )
 
@@ -336,15 +360,13 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     import re
 
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
     email = update.message.text.strip().lower()
 
     # Proper email validation using regex
     email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     if not re.match(email_pattern, email):
-        await update.message.reply_text(
-            "❌ Invalid email address. Please enter a valid email:\n\n"
-            "Example: your.name@example.com"
-        )
+        await update.message.reply_text(t("booking.email_invalid", lang))
         return ASKING_EMAIL
 
     # Update session with email
@@ -353,7 +375,7 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Get booking data from session
     booking_session = get_booking_session(user_id)
     if not booking_session:
-        await update.message.reply_text("❌ Session expired. Please start again.")
+        await update.message.reply_text(t("booking.session_expired", lang))
         return ConversationHandler.END
 
     # Track email entered (without tracking the actual email for privacy)
@@ -365,21 +387,30 @@ async def email_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
     dt = datetime.fromtimestamp(booking_session.timestamp, tz=ZoneInfo("Europe/Berlin"))
-    time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
+    time_str = format_time_on_long_date(dt, lang)
 
     keyboard = [
-        [InlineKeyboardButton("✅ Confirm Booking", callback_data="confirm_booking")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_booking")],
+        [
+            InlineKeyboardButton(
+                t("booking.btn_confirm", lang), callback_data="confirm_booking"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                t("booking.btn_cancel", lang), callback_data="cancel_booking"
+            )
+        ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        f"📋 <b>Please confirm your booking:</b>\n\n"
-        f"🕐 Time: {time_str}\n"
-        f"👤 Name: {booking_session.name}\n"
-        f"📧 Email: {email}\n\n"
-        f"<b>Important:</b> You will receive a confirmation email. "
-        f"You MUST click the link in that email to finalize your appointment!",
+        t(
+            "booking.confirm_summary",
+            lang,
+            time=time_str,
+            name=booking_session.name,
+            email=email,
+        ),
         parse_mode="HTML",
         reply_markup=reply_markup,
     )
@@ -395,6 +426,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
 
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
 
     if query.data == "cancel_booking":
         booking_session = get_booking_session(user_id)
@@ -408,13 +440,13 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 reason="user_initiated",
             )
         delete_booking_session(user_id)
-        await query.edit_message_text("❌ Booking cancelled.")
+        await query.edit_message_text(t("booking.cancelled", lang))
         return ConversationHandler.END
 
     # Get booking data from session
     booking_session = get_booking_session(user_id)
     if not booking_session:
-        await query.edit_message_text("❌ Session expired. Please start again.")
+        await query.edit_message_text(t("booking.session_expired", lang))
         return ConversationHandler.END
 
     # Track booking confirmed
@@ -433,9 +465,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     captcha_token = booking_session.captcha_token
     booking_start_time = booking_session.created_at
 
-    await query.edit_message_text(
-        "⏳ Processing your booking...\n" "This may take a few seconds."
-    )
+    await query.edit_message_text(t("booking.processing", lang))
 
     # Perform the booking
     try:
@@ -456,7 +486,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if result:
             process_id = result.get("processId")
             dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Berlin"))
-            time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
+            time_str = format_time_on_long_date(dt, lang)
 
             # Increment booking completed stats
             increment_bookings_completed()
@@ -476,22 +506,23 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
             keyboard = [
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+                [
+                    InlineKeyboardButton(
+                        t("common.btn_main_menu", lang), callback_data="main_menu"
+                    )
+                ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await query.edit_message_text(
-                f"🎉 <b>Booking Successful!</b> 🎉\n\n"
-                f"📋 Booking ID: {process_id}\n"
-                f"🕐 Time: {time_str}\n"
-                f"👤 Name: {name}\n"
-                f"📧 Email: {email}\n\n"
-                f"<b>⚠️ IMPORTANT - Next Steps:</b>\n\n"
-                f"1. Check your email inbox at <b>{email}</b>\n"
-                f"2. Look for a confirmation email from Munich Ausländerbehörde\n"
-                f"3. <b>Click the confirmation link</b> in that email\n"
-                f"4. Your appointment will only be finalized after email confirmation\n\n"
-                f"If you don't see the email within 5 minutes, check your spam folder.",
+                t(
+                    "booking.success",
+                    lang,
+                    process_id=process_id,
+                    time=time_str,
+                    name=name,
+                    email=email,
+                ),
                 reply_markup=reply_markup,
                 parse_mode="HTML",
             )
@@ -511,29 +542,33 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
             keyboard = [
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+                [
+                    InlineKeyboardButton(
+                        t("common.btn_main_menu", lang), callback_data="main_menu"
+                    )
+                ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await query.edit_message_text(
-                "❌ <b>Booking Failed</b>\n\n"
-                "The appointment could not be booked. Possible reasons:\n"
-                "• The slot was just taken by someone else\n"
-                "• Network error occurred\n"
-                "• Captcha token expired\n\n"
-                "Please try booking another available slot.",
+                t("booking.failed", lang),
                 reply_markup=reply_markup,
                 parse_mode="HTML",
             )
 
     except Exception as e:
         logger.error(f"Booking error: {e}")
-        keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    t("common.btn_main_menu", lang), callback_data="main_menu"
+                )
+            ]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"❌ An error occurred while booking:\n{str(e)}\n\n"
-            f"Please try again or contact support.",
+            t("booking.error", lang, error=str(e)),
             reply_markup=reply_markup,
         )
 
@@ -552,6 +587,7 @@ async def cancel_booking_button(
     await query.answer()
 
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
     booking_session = get_booking_session(user_id)
     if booking_session:
         # Determine at which step the cancellation happened
@@ -572,7 +608,7 @@ async def cancel_booking_button(
 
     delete_booking_session(user_id)
 
-    await query.edit_message_text("❌ Booking cancelled.")
+    await query.edit_message_text(t("booking.cancelled", lang))
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -582,6 +618,7 @@ async def cancel_booking_conversation(
 ) -> int:
     """Cancel the booking conversation"""
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
     booking_session = get_booking_session(user_id)
     if booking_session:
         # Track booking cancelled
@@ -595,7 +632,7 @@ async def cancel_booking_conversation(
 
     delete_booking_session(user_id)
 
-    await update.message.reply_text("❌ Booking cancelled.")
+    await update.message.reply_text(t("booking.cancelled", lang))
     context.user_data.clear()
     return ConversationHandler.END
 
