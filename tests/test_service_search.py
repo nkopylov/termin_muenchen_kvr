@@ -147,6 +147,28 @@ class TestTypos:
     def test_exact_matches_are_not_widened(self):
         assert ids("reisepass") == [PASSPORT]
 
+    def test_corrections_follow_a_replaced_catalog(self):
+        hunde = [{"id": 1, "name": "Hundesteuer"}]
+        assert search_services("hundestuer", CATALOG_SERVICES) == []
+        assert search_services("hundestuer", hunde) == hunde
+        assert search_services("hundestuer", CATALOG_SERVICES) == []
+
+    @pytest.mark.parametrize(
+        ("query", "found"),
+        [
+            ("anmedlung", True),  # swap
+            ("anmeldunk", True),  # substitution
+            ("anmeldunng", True),  # insertion
+            ("anmldung", True),  # deletion
+            ("anmeldungens", True),  # starts with a word one typo away
+            ("anmdelunk", False),
+            ("amneldunk", False),
+        ],
+    )
+    def test_one_typo_kinds(self, query, found):
+        services = [{"id": 1, "name": "Abmeldung Anmeldung"}]
+        assert (search_services(query, services) == services) is found
+
 
 class TestNameMatching:
     @pytest.mark.parametrize("query", ["führerschein", "fuehrerschein", "fuhrerschein"])

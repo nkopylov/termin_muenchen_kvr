@@ -103,7 +103,7 @@ class TestPostResult:
         )
 
 
-class TestLegacyCallsUnchanged:
+class TestGetAndPost:
     def test_get_returns_none_on_error(self, http):
         _, replies = http
         replies.append(response(400, {"errors": [{"errorCode": "captchaInvalid"}]}))

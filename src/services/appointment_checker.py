@@ -30,6 +30,7 @@ from src.services.queue_manager import is_user_in_queue
 from src.watches import availability, when
 from src.watches.alert_decision import AlertAction
 from src.watches.alert_ops import process_pending_retires
+from src.watches.availability import ApiError
 from src.watches.slots import (
     SlotTime,
     WatchSnapshot,
@@ -149,9 +150,7 @@ async def _end_paused_past_deadline(bot, today: date, now: datetime) -> int:
         ]
     ended = 0
     for watch_id in due:
-        ended += await end_watch_by_checker(
-            bot, watch_id, "deadline", now, is_user_in_queue
-        )
+        ended += await end_watch_by_checker(bot, watch_id, "deadline", now)
     return ended
 
 
@@ -160,7 +159,7 @@ async def _end_finished(
 ) -> list[tuple[WatchRecord, Window]]:
     """End watches past their deadline or without a public office; return the rest with
     their search windows. A user in booking keeps everything until the booking ends."""
-    catalog_loaded = bool(services_manager.get_full_payload().get("relations"))
+    catalog_loaded = services_manager.catalog_loaded()
     remaining = []
     for rec in active:
         window = effective_window(rec.when, today)
@@ -173,9 +172,7 @@ async def _end_finished(
             if not window.is_empty:
                 remaining.append((rec, window))
         elif not is_user_in_queue(rec.user_id):
-            result.ended += await end_watch_by_checker(
-                bot, rec.id, reason, now, is_user_in_queue
-            )
+            result.ended += await end_watch_by_checker(bot, rec.id, reason, now)
     return remaining
 
 
@@ -218,6 +215,21 @@ async def _snapshot(
     return WatchSnapshot(now, True, slots, times)
 
 
+async def _end_rejected(
+    bot,
+    watches: list[tuple[WatchRecord, Window]],
+    rejected: frozenset[int],
+    now: datetime,
+) -> int:
+    """End as gone the watches whose every office the city rejected for the service."""
+    ended = 0
+    for rec, _ in watches:
+        offices = set(availability.watch_office_ids(rec))
+        if offices and offices <= rejected and not is_user_in_queue(rec.user_id):
+            ended += await end_watch_by_checker(bot, rec.id, "gone", now, rejected)
+    return ended
+
+
 async def _check_service(
     bot,
     service_id: int,
@@ -239,7 +251,8 @@ async def _check_service(
     res, dropped = await availability.fetch_calendar_with_fallback(
         service_id, office_ids, start, end
     )
-    if not res.ok:
+    all_rejected = res.error is ApiError.COMBINATION and dropped == set(office_ids)
+    if not res.ok and not all_rejected:
         error = f"service {service_id}: {res.error}"
         logger.warning(f"Calendar query failed for {error}")
         result.query_failed(error)
@@ -252,6 +265,9 @@ async def _check_service(
         return
 
     result.query_ok()
+    result.ended += await _end_rejected(bot, watches, frozenset(dropped), now)
+    if all_rejected:
+        return
     data = res.data
     if data.get("availableDays"):
         result.appointments_found += 1
@@ -270,8 +286,8 @@ async def _check_service(
         if not snapshot.ok:
             continue
         with get_session() as session:
-            watches = WatchRepository(session)
-            current = watches.get(rec.id)
+            repo = WatchRepository(session)
+            current = repo.get(rec.id)
             # Deleted, or its office or time changed by the user while the query ran
             if (
                 current is None
@@ -279,7 +295,7 @@ async def _check_service(
                 or current.when != rec.when
             ):
                 continue
-            watches.record_check(rec.id, snapshot)
+            repo.record_check(rec.id, snapshot)
         action = await apply_alert(bot, rec.id, snapshot, now, is_user_in_queue)
         if action is AlertAction.PUSH:
             result.pushes += 1
@@ -319,7 +335,6 @@ async def check_iteration(application: Application, health: HealthState) -> None
     """One loop iteration: a check cycle plus stats, analytics and health alerts."""
     batch_start_time = time.time()
     stats["last_check_time"] = datetime.now()
-    stats["total_checks"] += 1
     result = CycleResult()
     last_error = None
 
@@ -327,6 +342,7 @@ async def check_iteration(application: Application, health: HealthState) -> None
         result = await run_check_cycle(
             application.bot, when.today_berlin(), when.utcnow()
         )
+        stats["total_checks"] += result.checks
         stats["successful_checks"] += result.successful
         stats["failed_checks"] += result.failed
         stats["appointments_found_count"] += result.appointments_found
@@ -338,6 +354,7 @@ async def check_iteration(application: Application, health: HealthState) -> None
         last_error = result.last_error
     except Exception as e:
         logger.exception("Error in check cycle")
+        stats["total_checks"] += 1
         stats["failed_checks"] += 1
         health.consecutive_failures += 1
         last_error = str(e)

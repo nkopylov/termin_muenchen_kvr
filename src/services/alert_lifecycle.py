@@ -26,7 +26,6 @@ from src.watches.alert_ops import (
     queue_retire,
 )
 from src.watches.alert_view import (
-    BERLIN,
     FinalState,
     RenderedAlert,
     render_alert,
@@ -35,7 +34,7 @@ from src.watches.alert_view import (
     render_outdated,
 )
 from src.watches.slots import WatchSnapshot, prune_past
-from src.watches.when import effective_window
+from src.watches.when import BERLIN, effective_window
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +49,13 @@ def office_gone(rec: WatchRecord) -> bool:
     return not public or (rec.office_id is not None and rec.office_id not in public)
 
 
-def _end_reason_holds(rec: WatchRecord, reason: str, now: datetime) -> bool:
+def _end_reason_holds(
+    rec: WatchRecord, reason: str, now: datetime, rejected_offices: frozenset[int]
+) -> bool:
     if reason == "deadline":
         return effective_window(rec.when, _berlin_date(now)) is None
-    return office_gone(rec)
+    offices = set(availability.watch_office_ids(rec))
+    return office_gone(rec) or bool(offices) and offices <= rejected_offices
 
 
 def _get(watch_id: int) -> WatchRecord | None:
@@ -218,15 +220,17 @@ async def end_watch_by_checker(
     watch_id: int,
     reason: Literal["deadline", "gone"],
     now: datetime,
-    booking_active: Callable[[int], bool],
+    rejected_offices: frozenset[int] = frozenset(),
 ) -> bool:
     """End an open watch; an active one gets its alert finalized and a silent S17/S17g
-    message registered as its live alert, a paused one ends without any message."""
+    message registered as its live alert, a paused one ends without any message.
+    "gone" also holds when the city rejected every office of the watch for its service
+    (rejected_offices)."""
     async with alert_lock(watch_id):
         rec = _get(watch_id)
         if rec is None or not rec.is_open:
             return False
-        if not _end_reason_holds(rec, reason, now):
+        if not _end_reason_holds(rec, reason, now, rejected_offices):
             return False
         with get_session() as session:
             WatchRepository(session).set_status(watch_id, "ended", end_reason=reason)

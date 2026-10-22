@@ -48,7 +48,6 @@ class TestGetToken:
         clock.now += 200
         assert await captcha_token.get_token() == "tok1"
         assert solver["calls"] == 1
-        assert captcha_token.last_solve_ms() is not None
 
     async def test_refreshes_when_less_than_min_ttl_left(self, clock, solver):
         await captcha_token.get_token()

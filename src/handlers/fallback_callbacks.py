@@ -1,4 +1,4 @@
-# ABOUTME: Buttons of messages sent before the watches UI; routes them to the current screens.
+# ABOUTME: Routes callbacks without a scheme prefix (myservices, cat:, srv:, ...) to the screens they map to.
 # ABOUTME: Registered last, so it also catches any callback no other handler took.
 
 from telegram import Update
@@ -72,7 +72,7 @@ async def _show_category(update, context, args: list[str]) -> bool:
 
 
 async def _route(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) -> bool:
-    """Shows the screen an old button leads to; False when it maps to none"""
+    """Shows the screen the callback data maps to; False when it maps to none"""
     if data in MY_WATCHES_DATA or data.startswith(MY_WATCHES_PREFIXES):
         await _show_my_watches(update, context)
         return True
@@ -90,7 +90,7 @@ async def _route(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) 
     return False
 
 
-async def legacy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def fallback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await safe_answer(query)
     text_input.clear_pending_input(context)

@@ -1,3 +1,5 @@
+# ABOUTME: SQLite engine, schema creation and in-place migrations (subscriptions to watches).
+# ABOUTME: get_session() is the context manager every repository call runs in.
 """
 Database initialization and session management
 Provides connection pooling and session lifecycle management

@@ -3,13 +3,18 @@ Service catalog manager for Munich appointment services.
 Fetches and caches service categories and information.
 """
 
+import functools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
+from typing import TypeVar
 
 from src.i18n import t
 from src.munich_api_client import get_api_client
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R")
 
 # Category definitions keyed by stable id; labels are i18n keys "categories.<id>"
 OTHER_CATEGORY = "sonstiges"
@@ -88,7 +93,27 @@ def refresh_catalog() -> bool:
 
 
 def catalog_loaded() -> bool:
-    return bool(_services_cache)
+    return bool(_services_cache) and bool(get_full_payload().get("relations"))
+
+
+def per_catalog(fn: Callable[..., R]) -> Callable[..., R]:
+    """Memoizes fn by its positional arguments until the cached catalog is replaced.
+    Results are shared between callers, so they must not be mutated."""
+    memo: dict[tuple, R] = {}
+    source: tuple = (None, None)
+
+    @functools.wraps(fn)
+    def wrapper(*args) -> R:
+        nonlocal source
+        current = (_full_payload_cache, _services_cache)
+        if current[0] is not source[0] or current[1] is not source[1]:
+            memo.clear()
+            source = current
+        if args not in memo:
+            memo[args] = fn(*args)
+        return memo[args]
+
+    return wrapper
 
 
 def get_services() -> list[dict]:

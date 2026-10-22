@@ -334,8 +334,19 @@ class TestEnds:
         assert len(bot.sent) == 2
 
 
+def reject_alone(*rejected: int, data: dict | None = None):
+    """Calendar reply: several offices or a rejected one -> combination error"""
+
+    def reply(_service_id, offices):
+        if len(offices) > 1 or offices[0] in rejected:
+            return CallResult(False, None, ApiError.COMBINATION)
+        return ok((data or {}).get(offices[0], calendar()))
+
+    return reply
+
+
 class TestCombinationFallback:
-    async def test_offices_rejected_alone_are_dropped_for_this_cycle(
+    async def test_watch_with_every_office_rejected_ends_gone(
         self, db, bot, fake_availability
     ):
         add_user(db, U1)
@@ -343,23 +354,70 @@ class TestCombinationFallback:
         any_office = add_watch(db, U1)
         office_a = add_watch(db, U2, office_id=A)
         d1 = D1.isoformat()
-
-        def reply(_service_id, offices):
-            if len(offices) > 1 or offices == [A]:
-                return CallResult(False, None, ApiError.COMBINATION)
-            if offices == [B]:
-                return ok(calendar({d1: [B]}, {d1: [(ts(D1, 11), B)]}))
-            return ok(calendar())
-
-        fake_availability.calendar_results = [reply] * 8
+        b_data = calendar({d1: [B]}, {d1: [(ts(D1, 11), B)]})
+        fake_availability.calendar_results = [reject_alone(A, data={B: b_data})] * 8
 
         result = await cycle(bot)
 
-        assert (result.successful, result.failed) == (1, 0)
+        assert (result.successful, result.failed, result.ended) == (1, 0, 1)
         assert get(db, any_office).snapshot.slots == {Slot(D1, B)}
-        assert get(db, office_a).last_checked_at is None
-        assert sent_to(bot, U2) == []
         assert len(sent_to(bot, U1)) == 1
+        rec = get(db, office_a)
+        assert (rec.status, rec.end_reason) == ("ended", "gone")
+        assert rec.last_checked_at is None
+        [message] = sent_to(bot, U2)
+        assert message.text == render_ended(rec, "en").text
+        assert message.disable_notification is True
+
+    async def test_service_with_every_office_rejected_ends_its_watches(
+        self, db, bot, fake_availability
+    ):
+        add_user(db, U1)
+        office_a = add_watch(db, U1, office_id=A)
+        fake_availability.calendar_results = [reject_alone(A)] * 2
+
+        result = await cycle(bot)
+
+        assert (result.successful, result.failed, result.ended) == (1, 0, 1)
+        assert get(db, office_a).end_reason == "gone"
+
+        calls = len(fake_availability.calendar_calls)
+        await cycle(bot)
+        assert len(fake_availability.calendar_calls) == calls
+
+    async def test_partly_rejected_watch_keeps_running(
+        self, db, bot, fake_availability
+    ):
+        add_user(db, U1)
+        any_office = add_watch(db, U1)
+        fake_availability.calendar_results = [reject_alone(A)] * 8
+
+        result = await cycle(bot)
+
+        assert result.ended == 0
+        rec = get(db, any_office)
+        assert rec.status == "active" and rec.last_checked_at is not None
+
+    async def test_booking_user_keeps_rejected_watch(self, db, bot, fake_availability):
+        add_user(db, U1)
+        office_a = add_watch(db, U1, office_id=A)
+        with Session(db) as session:
+            BookingSessionRepository(session).create_session(
+                U1,
+                "SELECTING_TIME",
+                SERVICE,
+                A,
+                D1.isoformat(),
+                "",
+                NOW + timedelta(minutes=15),
+            )
+        fake_availability.calendar_results = [reject_alone(A)] * 2
+
+        result = await cycle(bot)
+
+        assert result.ended == 0
+        assert get(db, office_a).status == "active"
+        assert bot.calls == []
 
 
 class TestDayTimes:
@@ -690,6 +748,41 @@ class TestHealth:
             batch["appointments_found"],
         ) == (1, 1, 1)
 
+    async def test_total_checks_count_service_queries(
+        self, db, fake_availability, fresh_stats, events, caplog
+    ):
+        events.patch(appointment_checker)
+        add_user(db, U1)
+        add_watch(db, U1, office_id=A)
+        add_watch(db, U1, service_id=OTHER_SERVICE, office_id=A)
+        fake_availability.calendar_results = [
+            by_service(
+                {
+                    SERVICE: ok(calendar()),
+                    OTHER_SERVICE: CallResult(False, None, ApiError.OTHER),
+                }
+            )
+        ] * 4
+        health = HealthState()
+
+        with caplog.at_level(logging.WARNING, logger=appointment_checker.__name__):
+            await check_iteration(FakeApplication(FakeBot()), health)
+            await check_iteration(FakeApplication(FakeBot()), health)
+
+        assert [r.getMessage() for r in caplog.records] == [
+            f"Calendar query failed for service {OTHER_SERVICE}: other"
+        ] * 2
+        assert (
+            fresh_stats["total_checks"],
+            fresh_stats["successful_checks"],
+            fresh_stats["failed_checks"],
+        ) == (4, 2, 2)
+
+    async def test_cycle_without_watches_counts_no_checks(self, db, fresh_stats):
+        await check_iteration(FakeApplication(FakeBot()), HealthState())
+        assert fresh_stats["total_checks"] == 0
+        assert fresh_stats["last_check_time"] is not None
+
     async def test_exception_counts_as_failure(
         self, db, fresh_stats, monkeypatch, caplog
     ):
@@ -703,7 +796,7 @@ class TestHealth:
             await check_iteration(FakeApplication(FakeBot()), health)
 
         assert health.consecutive_failures == 1
-        assert fresh_stats["failed_checks"] == 1
+        assert (fresh_stats["total_checks"], fresh_stats["failed_checks"]) == (1, 1)
         [record] = caplog.records
         assert record.getMessage() == "Error in check cycle"
         assert str(record.exc_info[1]) == "boom"

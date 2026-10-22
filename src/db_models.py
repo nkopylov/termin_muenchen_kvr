@@ -1,3 +1,5 @@
+# ABOUTME: SQLModel table models: users, watches, booking sessions, pending retires, appointment logs.
+# ABOUTME: service_subscriptions is only read by the migration to watches and deleted with a user.
 """
 Database models using SQLModel
 Provides type-safe ORM with Pydantic validation

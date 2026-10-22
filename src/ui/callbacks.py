@@ -13,8 +13,8 @@ SETTINGS_RE = r"^s1:"
 BOOK_DAY_RE = r"^b1:\d+:\d{8}$"
 BOOK_RE = r"^b1:"
 NAV_RE = r"^(f1|w1|s1):|^lang:|^language$"
-# Booking buttons of messages sent before the "b1:" scheme
-LEGACY_BOOKING_RE = r"^time_\d+$|^confirm_booking$|^cancel_booking$"
+# Booking buttons without a scheme prefix: time_<timestamp>, confirm_booking, cancel_booking
+UNVERSIONED_BOOKING_RE = r"^time_\d+$|^confirm_booking$|^cancel_booking$"
 
 WHEN_PRESETS = ("asap", "2w", "1m", "3m")
 DATE_MODES = ("b", "r")  # before a date, range of dates

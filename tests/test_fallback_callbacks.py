@@ -1,4 +1,4 @@
-# ABOUTME: Tests that buttons of messages from before the watches UI land on the current screens.
+# ABOUTME: Tests that callbacks without a scheme prefix land on the screens they map to.
 # ABOUTME: Find-flow steps (another stream) are replaced by recorders; My watches is real.
 
 import pytest
@@ -9,7 +9,7 @@ from src.commands import find
 from src.commands.watches import build_watches_screen
 from src.db_models import ServiceSubscription
 from src.handlers import text_input
-from src.handlers.legacy_callbacks import legacy_callback
+from src.handlers.fallback_callbacks import fallback_callback
 from src.i18n import t
 from src.repositories import UserRepository, WatchRepository
 from src.watches.when import PRESETS
@@ -74,7 +74,7 @@ def steps(monkeypatch):
 async def press(data):
     bot = FakeBot()
     context = FakeContext(bot)
-    await legacy_callback(
+    await fallback_callback(
         make_callback_update(data, message_id=OLD_MSG, bot=bot), context
     )
     return bot, context

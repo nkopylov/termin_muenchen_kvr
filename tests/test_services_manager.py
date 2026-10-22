@@ -142,6 +142,34 @@ class TestNoFetchOnRead:
         assert services_manager.catalog_loaded() is True
         assert services_manager.get_services() == PAYLOAD["services"]
 
+    def test_catalog_without_relations_is_not_loaded(self, monkeypatch):
+        without_relations = {**PAYLOAD, "relations": []}
+        monkeypatch.setattr(services_manager, "_services_cache", PAYLOAD["services"])
+        monkeypatch.setattr(services_manager, "_full_payload_cache", without_relations)
+
+        assert services_manager.catalog_loaded() is False
+
+
+class TestPerCatalog:
+    def test_computed_once_per_catalog_and_argument(self, cached_catalog, monkeypatch):
+        calls = []
+
+        @services_manager.per_catalog
+        def office_count(service_id):
+            calls.append(service_id)
+            return len(services_manager.get_full_payload()["offices"])
+
+        assert office_count(1) == office_count(1) == 1
+        assert office_count(2) == 1
+        assert calls == [1, 2]
+
+        fresh = {**PAYLOAD, "offices": PAYLOAD["offices"] * 2}
+        monkeypatch.setattr(services_manager, "fetch_full_payload", lambda: fresh)
+        assert services_manager.refresh_catalog() is True
+
+        assert office_count(1) == 2
+        assert calls == [1, 2, 1]
+
 
 class TestOfficeFallback:
     @pytest.mark.parametrize(

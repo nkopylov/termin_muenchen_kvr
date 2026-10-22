@@ -39,7 +39,8 @@ class CallResult:
     error: ApiError | None
 
 
-def public_office_ids(service_id: int) -> set[int]:
+@services_manager.per_catalog
+def public_office_ids(service_id: int) -> frozenset[int]:
     """Offices with a public relation to the service that exist in the catalog, without
     those that disable the service (the city website hides them and they get no slots)."""
     payload = services_manager.get_full_payload()
@@ -48,15 +49,16 @@ def public_office_ids(service_id: int) -> set[int]:
         for office in payload.get("offices", [])
         if service_id not in (office.get("disabledByServices") or ())
     }
-    return {
+    return frozenset(
         r["officeId"]
         for r in payload.get("relations", [])
         if r["serviceId"] == service_id
         and r.get("public", True)
         and r["officeId"] in bookable
-    }
+    )
 
 
+@services_manager.per_catalog
 def _shared_booking_ids(service_id: int) -> dict[int, frozenset[int]]:
     """Each public office of the service mapped to the public offices that share its
     booking queue (sharedBookingOfficeIds), itself included."""
@@ -73,7 +75,14 @@ def _shared_booking_ids(service_id: int) -> dict[int, frozenset[int]]:
 def office_choices(service_id: int) -> list[int]:
     """The service's public offices as the city website offers them: offices sharing a
     booking queue are one choice, named by their lowest id."""
-    return sorted({min(group) for group in _shared_booking_ids(service_id).values()})
+    return list(_office_choices(service_id))
+
+
+@services_manager.per_catalog
+def _office_choices(service_id: int) -> tuple[int, ...]:
+    return tuple(
+        sorted({min(group) for group in _shared_booking_ids(service_id).values()})
+    )
 
 
 def booking_group(service_id: int, office_id: int) -> list[int]:

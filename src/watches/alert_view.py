@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from itertools import groupby
-from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -24,8 +23,8 @@ from src.watches.labels import (
     watch_summary,
 )
 from src.watches.slots import SlotTime, WatchSnapshot, top_days
+from src.watches.when import BERLIN
 
-BERLIN = ZoneInfo("Europe/Berlin")
 MAX_TIMES = 5
 LISTED_OTHER_DAYS = 2
 

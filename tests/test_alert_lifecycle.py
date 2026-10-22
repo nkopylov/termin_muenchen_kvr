@@ -576,7 +576,7 @@ class TestEndByChecker:
         watch_id = add_watch(db, when=WhenSpec("before", date_to=NOW.date()))
         make_live(db, watch_id, Slot(D1, A))
 
-        assert await end_watch_by_checker(bot, watch_id, "deadline", NOW, never_booking)
+        assert await end_watch_by_checker(bot, watch_id, "deadline", NOW)
 
         rec = get(db, watch_id)
         assert (rec.status, rec.end_reason) == ("ended", "deadline")
@@ -598,7 +598,7 @@ class TestEndByChecker:
         add_user(db, lang="ru")
         watch_id = add_watch(db, office_id=999)
 
-        assert await end_watch_by_checker(bot, watch_id, "gone", NOW, never_booking)
+        assert await end_watch_by_checker(bot, watch_id, "gone", NOW)
 
         rec = get(db, watch_id)
         assert (rec.status, rec.end_reason) == ("ended", "gone")
@@ -614,7 +614,7 @@ class TestEndByChecker:
         tapped_at = NOW - timedelta(minutes=2)
         tap(db, watch_id, tapped_at)
 
-        await end_watch_by_checker(bot, watch_id, "deadline", NOW, never_booking)
+        await end_watch_by_checker(bot, watch_id, "deadline", NOW)
 
         assert bot.edits == []
         [item] = all_queued(db)
@@ -628,7 +628,7 @@ class TestEndByChecker:
         with Session(db) as session:
             WatchRepository(session).set_status(watch_id, "paused", pause_reason="user")
 
-        assert await end_watch_by_checker(bot, watch_id, "deadline", NOW, never_booking)
+        assert await end_watch_by_checker(bot, watch_id, "deadline", NOW)
 
         rec = get(db, watch_id)
         assert (rec.status, rec.end_reason) == ("ended", "deadline")
@@ -642,9 +642,7 @@ class TestEndByChecker:
         with Session(db) as session:
             WatchRepository(session).set_when(watch_id, PRESETS["asap"])
 
-        assert not await end_watch_by_checker(
-            bot, watch_id, "deadline", NOW, never_booking
-        )
+        assert not await end_watch_by_checker(bot, watch_id, "deadline", NOW)
 
         rec = get(db, watch_id)
         assert (rec.status, rec.end_reason) == ("active", None)
@@ -657,18 +655,31 @@ class TestEndByChecker:
         with Session(db) as session:
             WatchRepository(session).set_office(watch_id, None)
 
-        assert not await end_watch_by_checker(bot, watch_id, "gone", NOW, never_booking)
+        assert not await end_watch_by_checker(bot, watch_id, "gone", NOW)
 
         assert get(db, watch_id).status == "active"
         assert bot.calls == []
 
+    async def test_gone_when_every_office_was_rejected(self, db, bot, clock):
+        add_user(db)
+        rejected = add_watch(db, office_id=A)
+        switched = add_watch(db, service_id=1063441, office_id=A)
+        with Session(db) as session:
+            WatchRepository(session).set_office(switched, B)
+
+        assert await end_watch_by_checker(bot, rejected, "gone", NOW, frozenset({A}))
+        assert not await end_watch_by_checker(
+            bot, switched, "gone", NOW, frozenset({A})
+        )
+
+        assert get(db, rejected).end_reason == "gone"
+        assert get(db, switched).status == "active"
+
     async def test_ended_or_missing_watch_is_left_alone(self, db, bot, watch):
         with Session(db) as session:
             WatchRepository(session).set_status(watch, "ended", end_reason="stopped")
-        assert not await end_watch_by_checker(
-            bot, watch, "deadline", NOW, never_booking
-        )
-        assert not await end_watch_by_checker(bot, 999, "deadline", NOW, never_booking)
+        assert not await end_watch_by_checker(bot, watch, "deadline", NOW)
+        assert not await end_watch_by_checker(bot, 999, "deadline", NOW)
         assert get(db, watch).end_reason == "stopped"
         assert bot.calls == []
 
@@ -679,7 +690,7 @@ class TestEndByChecker:
         other = add_watch(db, service_id=1063441)
         bot.fail_next("send_message", Forbidden("bot was blocked by the user"))
 
-        assert await end_watch_by_checker(bot, watch_id, "deadline", NOW, never_booking)
+        assert await end_watch_by_checker(bot, watch_id, "deadline", NOW)
 
         assert get(db, watch_id).status == "ended"
         assert get(db, watch_id).live is None

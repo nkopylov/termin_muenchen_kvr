@@ -108,14 +108,24 @@ class TestOffices:
         assert availability.watch_office_ids(watch()) == sorted(OFFICES)
         assert availability.watch_office_ids(watch(10489)) == [10489]
 
-    def test_office_disabled_for_the_service_is_not_public(self, catalog):
+    def test_office_disabled_for_the_service_is_not_public(self, catalog, monkeypatch):
         from src import services_manager
 
-        payload = services_manager._full_payload_cache
-        office = next(o for o in payload["offices"] if o["id"] == 10489)
-        office["disabledByServices"] = [SID, 1063441]
+        def disable_10489_for(*service_ids):
+            payload = services_manager._full_payload_cache
+            offices = [
+                {**o, "disabledByServices": list(service_ids)}
+                if o["id"] == 10489
+                else o
+                for o in payload["offices"]
+            ]
+            monkeypatch.setattr(
+                services_manager, "_full_payload_cache", {**payload, "offices": offices}
+            )
+
+        disable_10489_for(SID, 1063441)
         assert availability.public_office_ids(SID) == set(OFFICES) - {10489}
-        office["disabledByServices"] = [1063441]
+        disable_10489_for(1063441)
         assert availability.public_office_ids(SID) == set(OFFICES)
 
     def test_shared_booking_group_is_one_choice(self, catalog):

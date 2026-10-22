@@ -36,6 +36,7 @@ def service_label(service_id: int, lang: str | None) -> str:
     return name
 
 
+@services_manager.per_catalog
 def _office_names() -> dict[int, str]:
     payload = services_manager.get_full_payload()
     return {
@@ -57,7 +58,10 @@ def office_label(
     if service_id is None:
         return label
 
+    # Numbered like the choice that stands for its booking queue, if that has the same name
     shown = min(booking_group(service_id, office_id))
+    if shown not in names or _short_office_name(names[shown]) != label:
+        shown = office_id
     twins = sorted(
         oid
         for oid in {*office_choices(service_id), shown}

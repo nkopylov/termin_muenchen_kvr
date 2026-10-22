@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 def _pending_users() -> list[tuple[int, str, int]]:
-    """(user_id, language, open watches) of users with a language and the old command list"""
+    """(user_id, language, open watches) of users with a language and ui_version below
+    UI_COMMANDS_SET"""
     with get_session() as session:
         watches = WatchRepository(session)
         return [
@@ -46,7 +47,7 @@ def _set_ui_version(user_id: int, version: int) -> None:
         UserRepository(session).set_ui_version(user_id, version)
 
 
-async def announce_new_ui(bot) -> int:
+async def announce_reply_keyboard(bot) -> int:
     """Returns how many users were announced to."""
     announced = 0
     for user_id, lang, open_watches in _pending_users():
@@ -64,7 +65,7 @@ async def announce_new_ui(bot) -> int:
             _set_ui_version(user_id, UI_KEYBOARD_DELIVERED)
             with get_session() as session:
                 WatchRepository(session).pause_all_for_user(user_id, reason="blocked")
-    logger.info(f"Announced the new menu to {announced} user(s)")
+    logger.info(f"Announced the reply-keyboard menu to {announced} user(s)")
     await _ask_for_language(bot)
     return announced
 

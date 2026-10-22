@@ -13,7 +13,6 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from functools import wraps
 from typing import NoReturn
-from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -65,11 +64,10 @@ logger = logging.getLogger(__name__)
 # Booking session timeout (15 minutes)
 BOOKING_SESSION_TIMEOUT_SECONDS = 900
 MAX_TIME_BUTTONS = 12
-BERLIN = ZoneInfo("Europe/Berlin")
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
-# Book buttons of alerts sent before the "b1:" scheme: book_<date>_<office>_<service>
-LEGACY_BOOK_RE = r"^book_\d{4}-\d{2}-\d{2}_\d+_\d+$"
+# Book buttons naming a day, an office and a service but no watch: book_<date>_<office>_<service>
+BOOK_OFFICE_DAY_RE = r"^book_\d{4}-\d{2}-\d{2}_\d+_\d+$"
 BOOK_TIME_RE = r"^b1:t:\d{1,10}:\d{1,10}$"
 BOOK_CONFIRM_RE = r"^b1:(ok|me)$"
 BOOK_CHANGE_RE = r"^b1:chg$"
@@ -191,7 +189,7 @@ def is_valid_email(email: str) -> bool:
 
 
 def _berlin(timestamp: int) -> datetime:
-    return datetime.fromtimestamp(timestamp, tz=BERLIN)
+    return datetime.fromtimestamp(timestamp, tz=when.BERLIN)
 
 
 def format_time_on_date(dt: datetime, lang: str) -> str:
@@ -302,8 +300,10 @@ async def book_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> NoRetu
     )
 
 
-async def book_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> NoReturn:
-    """Book tapped on an alert sent before watches (book_<date>_<office>_<service>)"""
+async def book_office_day(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> NoReturn:
+    """Book tapped on a book_<date>_<office>_<service> button, which names no watch"""
     query = update.callback_query
     user_id = update.effective_user.id
     lang = get_user_language(user_id, context)
@@ -325,12 +325,12 @@ async def book_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> NoR
         office_ids=[office_id],
         session_office_id=office_id,
         day=day,
-        watch_id=_legacy_watch_id(user_id, service_id, office_id),
+        watch_id=_watch_for_office(user_id, service_id, office_id),
     )
 
 
-def _legacy_watch_id(user_id: int, service_id: int, office_id: int) -> int | None:
-    """The open watch that took over the subscription the old alert was sent for"""
+def _watch_for_office(user_id: int, service_id: int, office_id: int) -> int | None:
+    """The user's open watch of the service that searches office_id, if any"""
     with get_session() as session:
         rec = WatchRepository(session).find_open(user_id, service_id)
     if rec is None:
@@ -983,7 +983,7 @@ def build_booking_conversation() -> ConversationHandler:
         return ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(book_day, pattern=BOOK_DAY_RE),
-                CallbackQueryHandler(book_legacy, pattern=LEGACY_BOOK_RE),
+                CallbackQueryHandler(book_office_day, pattern=BOOK_OFFICE_DAY_RE),
             ],
             states={
                 SELECTING_TIME: [

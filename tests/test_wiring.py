@@ -29,8 +29,8 @@ from src.commands.stats import stats_command
 from src.commands.stop import stop_command
 from src.commands.watches import watches_callback, watches_command
 from src.handlers.errors import on_error
+from src.handlers.fallback_callbacks import fallback_callback
 from src.handlers.interaction_tracker import record_interaction
-from src.handlers.legacy_callbacks import legacy_callback
 from src.handlers.menu_keyboard import menu_text
 from src.handlers.presence import on_presence
 from src.handlers.text_input import on_text
@@ -113,9 +113,9 @@ def test_commands(application, command, callback):
         ("time_1796292600", booking_orphan_callback),
         ("confirm_booking", booking_orphan_callback),
         ("cancel_booking", booking_orphan_callback),
-        ("main_menu", legacy_callback),
-        ("unsub:1", legacy_callback),
-        ("anything", legacy_callback),
+        ("main_menu", fallback_callback),
+        ("unsub:1", fallback_callback),
+        ("anything", fallback_callback),
     ],
 )
 def test_callbacks(application, data, callback):
@@ -192,14 +192,16 @@ class TestStartup:
     async def test_announcement_before_checker(self, monkeypatch):
         calls = []
 
-        async def announce_new_ui(bot):
+        async def announce_reply_keyboard(bot):
             calls.append("announce")
             return 0
 
         async def check_and_notify(application):
             calls.append("checker")
 
-        monkeypatch.setattr(telegram_bot, "announce_new_ui", announce_new_ui)
+        monkeypatch.setattr(
+            telegram_bot, "announce_reply_keyboard", announce_reply_keyboard
+        )
         monkeypatch.setattr(telegram_bot, "check_and_notify", check_and_notify)
 
         await telegram_bot.startup_sequence(
@@ -207,6 +209,30 @@ class TestStartup:
         )
 
         assert calls == ["announce", "checker"]
+
+    async def test_checker_starts_when_announcement_fails(self, monkeypatch, caplog):
+        calls = []
+
+        async def announce_reply_keyboard(bot):
+            calls.append("announce")
+            raise RuntimeError("database locked")
+
+        async def check_and_notify(application):
+            calls.append("checker")
+
+        monkeypatch.setattr(
+            telegram_bot, "announce_reply_keyboard", announce_reply_keyboard
+        )
+        monkeypatch.setattr(telegram_bot, "check_and_notify", check_and_notify)
+
+        with caplog.at_level("ERROR", logger=telegram_bot.logger.name):
+            await telegram_bot.startup_sequence(
+                Application.builder().token("1:test").build()
+            )
+
+        assert calls == ["announce", "checker"]
+        [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert record.exc_info[0] is RuntimeError
 
 
 def test_update_type_handler_accepts_updates(application):

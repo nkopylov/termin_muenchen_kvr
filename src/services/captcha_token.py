@@ -19,7 +19,6 @@ _solve = get_fresh_captcha_token
 
 _token: str | None = None
 _expires_at: float = 0.0
-_last_solve_ms: int | None = None
 
 
 def is_token_error(codes: Iterable[str]) -> bool:
@@ -33,10 +32,6 @@ def invalidate() -> None:
     _expires_at = 0.0
 
 
-def last_solve_ms() -> int | None:
-    return _last_solve_ms
-
-
 def _cached(min_ttl: float) -> str | None:
     if _token is not None and _expires_at - _clock() >= min_ttl:
         return _token
@@ -45,7 +40,7 @@ def _cached(min_ttl: float) -> str | None:
 
 async def get_token(min_ttl: float = 30.0) -> str | None:
     """A token valid for at least `min_ttl` more seconds, or None if one cannot be solved."""
-    global _token, _expires_at, _last_solve_ms
+    global _token, _expires_at
     if (token := _cached(min_ttl)) is not None:
         return token
 
@@ -58,7 +53,6 @@ async def get_token(min_ttl: float = 30.0) -> str | None:
         except (OSError, ValueError, KeyError, TypeError) as e:
             logger.error(f"Captcha token could not be solved: {e}")
             token = None
-        _last_solve_ms = int((_clock() - started) * 1000)
         if not token:
             invalidate()
             return None

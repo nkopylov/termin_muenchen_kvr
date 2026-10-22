@@ -1,3 +1,5 @@
+# ABOUTME: Bot entry point: registers command, callback and text handlers in dispatch order.
+# ABOUTME: post_init loads the catalog, then one task announces the menu and runs the checker.
 """
 Munich Appointment Bot - Main Entry Point
 Minimal bot setup that wires together all commands and handlers.
@@ -43,21 +45,21 @@ from src.database import init_database
 
 # Import handlers
 from src.handlers.errors import on_error
+from src.handlers.fallback_callbacks import fallback_callback
 from src.handlers.interaction_tracker import record_interaction
-from src.handlers.legacy_callbacks import legacy_callback
 from src.handlers.menu_keyboard import menu_text
 from src.handlers.presence import on_presence
 from src.handlers.text_input import on_text
 from src.services.analytics_service import cleanup_analytics
-from src.services.announcement import announce_new_ui
+from src.services.announcement import announce_reply_keyboard
 
 # Import services
 from src.services.appointment_checker import check_and_notify, set_bot_start_time
 from src.ui.callbacks import (
     BOOK_RE,
     FIND_RE,
-    LEGACY_BOOKING_RE,
     SETTINGS_RE,
+    UNVERSIONED_BOOKING_RE,
     WATCH_RE,
 )
 from src.ui.commands_menu import set_default_commands
@@ -91,7 +93,10 @@ COMMANDS = (
 
 async def startup_sequence(application: Application) -> None:
     """Announce the reply-keyboard menu first, so no alert reaches a user before it"""
-    await announce_new_ui(application.bot)
+    try:
+        await announce_reply_keyboard(application.bot)
+    except Exception:
+        logger.exception("Startup announcement failed; starting the checker anyway")
     logger.info("Background appointment checker started")
     await check_and_notify(application)
 
@@ -143,7 +148,7 @@ def register_handlers(application: Application) -> None:
         (find_callback, FIND_RE),
         (watches_callback, WATCH_RE),
         (settings_callback, SETTINGS_RE),
-        (booking_orphan_callback, f"{BOOK_RE}|{LEGACY_BOOKING_RE}"),
+        (booking_orphan_callback, f"{BOOK_RE}|{UNVERSIONED_BOOKING_RE}"),
     )
     for callback, pattern in callbacks:
         application.add_handler(
@@ -157,7 +162,7 @@ def register_handlers(application: Application) -> None:
     )
 
     # Buttons no other handler took
-    application.add_handler(CallbackQueryHandler(legacy_callback), group=1)
+    application.add_handler(CallbackQueryHandler(fallback_callback), group=1)
 
     application.add_error_handler(on_error)
 

@@ -1,4 +1,4 @@
-# ABOUTME: Tests for the one-time new-menu announcement at startup (S31, section 9.3).
+# ABOUTME: Tests for the one-time reply-keyboard menu announcement at startup (S31, section 9.3).
 # ABOUTME: Real in-memory DB, recording FakeBot.
 
 import pytest
@@ -10,7 +10,7 @@ from telegram.ext import ApplicationHandlerStop
 from src.commands.language import language_gate
 from src.i18n import t
 from src.repositories import UserRepository, WatchRepository
-from src.services.announcement import announce_new_ui
+from src.services.announcement import announce_reply_keyboard
 from src.ui.commands_menu import bot_commands
 from src.watches.when import PRESETS
 from tests.fakes import FakeBot, FakeContext, make_text_update
@@ -54,7 +54,7 @@ def users(db):
 async def test_levels_commands_and_messages(db, users):
     bot = FakeBot()
 
-    assert await announce_new_ui(bot) == 2
+    assert await announce_reply_keyboard(bot) == 2
 
     by_chat = {c.chat_id: c for c in bot.sent}
     assert set(by_chat) == {WITH_WATCH_EN, WITH_WATCH_RU, NO_LANGUAGE}
@@ -87,7 +87,7 @@ async def test_watcher_without_language_is_asked_for_one(db):
     add_user(db, 7, "")
     bot = FakeBot()
 
-    await announce_new_ui(bot)
+    await announce_reply_keyboard(bot)
 
     [picker] = bot.sent
     assert picker.chat_id == NO_LANGUAGE
@@ -105,7 +105,7 @@ async def test_watcher_without_language_is_asked_for_one(db):
 async def test_startup_picker_is_retired_by_the_next_picker(db):
     add_user(db, NO_LANGUAGE, "", watches=1)
     bot = FakeBot()
-    await announce_new_ui(bot)
+    await announce_reply_keyboard(bot)
     [startup_picker] = bot.sent
 
     with pytest.raises(ApplicationHandlerStop):
@@ -124,9 +124,9 @@ async def test_startup_picker_is_retired_by_the_next_picker(db):
 
 
 async def test_idempotent(db, users):
-    await announce_new_ui(FakeBot())
+    await announce_reply_keyboard(FakeBot())
     bot = FakeBot()
-    assert await announce_new_ui(bot) == 0
+    assert await announce_reply_keyboard(bot) == 0
     assert bot.calls == []
 
 
@@ -135,7 +135,7 @@ async def test_blocked_user_is_paused_and_not_retried(db):
     bot = FakeBot()
     bot.fail_next("send_message", Forbidden("Forbidden: bot was blocked by the user"))
 
-    assert await announce_new_ui(bot) == 0
+    assert await announce_reply_keyboard(bot) == 0
 
     assert ui_version(db, WITH_WATCH_EN) == 2
     with Session(db) as session:
@@ -148,10 +148,10 @@ async def test_transient_failure_is_retried_next_start(db, caplog):
     bot = FakeBot()
     bot.fail_next("send_message", NetworkError("connection reset"))
 
-    assert await announce_new_ui(bot) == 0
+    assert await announce_reply_keyboard(bot) == 0
     assert ui_version(db, WITH_WATCH_EN) == 0
     assert any("connection reset" in r.getMessage() for r in caplog.records)
 
     bot = FakeBot()
-    assert await announce_new_ui(bot) == 1
+    assert await announce_reply_keyboard(bot) == 1
     assert ui_version(db, WITH_WATCH_EN) == 2

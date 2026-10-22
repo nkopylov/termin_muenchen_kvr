@@ -4,13 +4,9 @@ Tests for repository layer (data access layer)
 
 from datetime import datetime, timedelta
 
-from sqlmodel import select
-
-from src.db_models import ServiceSubscription
 from src.repositories import (
     AppointmentLogRepository,
     BookingSessionRepository,
-    SubscriptionRepository,
     UserRepository,
 )
 
@@ -81,31 +77,6 @@ class TestUserRepository:
         users = repo.get_all_users()
         assert len(users) == 3
         assert {u.user_id for u in users} == {1, 2, 3}
-
-
-class TestSubscriptionRepository:
-    """Tests for SubscriptionRepository"""
-
-    def test_delete_all_user_subscriptions(self, db_session):
-        """Deletes only the given user's subscriptions"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-        user_repo.create_user(user_id=2)
-        for user_id, service_id in ((12345, 100), (12345, 101), (2, 100)):
-            db_session.add(
-                ServiceSubscription(
-                    user_id=user_id, service_id=service_id, office_id=200
-                )
-            )
-        db_session.commit()
-
-        deleted_count = SubscriptionRepository(
-            db_session
-        ).delete_all_user_subscriptions(12345)
-        assert deleted_count == 2
-
-        remaining = db_session.exec(select(ServiceSubscription)).all()
-        assert [s.user_id for s in remaining] == [2]
 
 
 class TestAppointmentLogRepository:

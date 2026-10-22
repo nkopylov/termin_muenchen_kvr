@@ -1,3 +1,5 @@
+# ABOUTME: Repositories for every table: users, watches, booking sessions, pending retires, logs.
+# ABOUTME: Watches, booking sessions and retires are returned as frozen dataclass records.
 """
 Repository pattern for database access
 Provides clean separation between business logic and data access
@@ -139,22 +141,6 @@ class UserRepository:
         self.session.exec(delete(User).where(User.user_id == user_id))
         self.session.commit()
         self.session.expire_all()
-
-
-class SubscriptionRepository:
-    """Repository for ServiceSubscription operations"""
-
-    def __init__(self, session: Session):
-        self.session = session
-
-    def delete_all_user_subscriptions(self, user_id: int) -> int:
-        """Delete all subscriptions for a user"""
-        statement = delete(ServiceSubscription).where(
-            ServiceSubscription.user_id == user_id
-        )
-        result = self.session.exec(statement)
-        self.session.commit()
-        return result.rowcount
 
 
 class AppointmentLogRepository:
@@ -300,16 +286,6 @@ class BookingSessionRepository:
         if session is None or session.expires_at <= when_module.utcnow():
             return None
         return BookingSessionRecord.from_row(session)
-
-    def message_ids_in_booking(self, now: datetime) -> set[tuple[int, int]]:
-        """(chat_id, message_id) of booking messages of unexpired sessions"""
-        statement = select(BookingSession.user_id, BookingSession.message_id).where(
-            BookingSession.expires_at > now, BookingSession.message_id.is_not(None)
-        )
-        return {
-            (user_id, message_id)
-            for user_id, message_id in self.session.exec(statement)
-        }
 
     def pop_expired_sessions(self) -> list["BookingSessionRecord"]:
         """Delete expired sessions and return what they were"""

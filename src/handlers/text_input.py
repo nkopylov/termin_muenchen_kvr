@@ -1,6 +1,7 @@
 # ABOUTME: Plain text messages: a typed date answer when one is awaited, otherwise a service search.
 # ABOUTME: The awaited answer lives in context.user_data[AWAIT_KEY].
 
+import asyncio
 import html
 from datetime import timedelta
 
@@ -84,7 +85,9 @@ async def _search(
         return
 
     query = text.strip()[:MAX_QUERY_CHARS]
-    results = search_services(query, services_manager.get_services())
+    results = await asyncio.to_thread(
+        search_services, query, services_manager.get_services()
+    )
     rows = [
         [
             InlineKeyboardButton(

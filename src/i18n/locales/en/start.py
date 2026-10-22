@@ -1,4 +1,4 @@
-# ABOUTME: English texts for /start: the welcome, the returning-user greeting and the new-menu announcement.
+# ABOUTME: English texts for /start: the welcome, the returning-user greeting and the menu announcement.
 # ABOUTME: Keys are "start.<name>".
 
 MESSAGES: dict[str, str | dict[str, str]] = {

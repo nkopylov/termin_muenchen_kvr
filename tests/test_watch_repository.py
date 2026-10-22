@@ -589,13 +589,6 @@ class TestBookingSessionAdditions:
         assert repo.get_session(USER) is not None
         assert repo.get_active(USER) is None
 
-    def test_message_ids_in_booking(self, db_session):
-        repo = BookingSessionRepository(db_session)
-        self._create(repo, USER, expires=NOW + timedelta(minutes=5), message_id=70)
-        self._create(repo, OTHER, expires=NOW - timedelta(minutes=5), message_id=80)
-        self._create(repo, 3, expires=NOW + timedelta(minutes=5))
-        assert repo.message_ids_in_booking(NOW) == {(USER, 70)}
-
     def test_pop_expired_and_pop_all(self, db_session):
         repo = BookingSessionRepository(db_session)
         now = when.utcnow()

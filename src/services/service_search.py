@@ -2,6 +2,7 @@
 # ABOUTME: Pure functions: normalization, synonym lookup, ranking and a one-typo fallback.
 
 import re
+from dataclasses import dataclass
 
 from src.watches.labels import POPULAR_SERVICE_IDS
 
@@ -162,37 +163,63 @@ def _name_synonym_hits(name: str, query_words: list[str]) -> int:
     )
 
 
-def _typo_distance(a: str, b: str) -> int:
-    """Edit distance counting a swap of two neighbouring letters as one edit."""
-    prev2: list[int] = []
-    prev = list(range(len(b) + 1))
-    for i in range(1, len(a) + 1):
-        row = [i] + [0] * len(b)
-        for j in range(1, len(b) + 1):
-            cost = a[i - 1] != b[j - 1]
-            row[j] = min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost)
-            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
-                row[j] = min(row[j], prev2[j - 2] + 1)
-        prev2, prev = prev, row
-    return prev[-1]
+def _within_one_typo(a: str, b: str) -> bool:
+    """Edit distance of at most one, counting a swap of two neighbouring letters as one edit."""
+    if len(a) < len(b):
+        a, b = b, a
+    if len(a) - len(b) > 1:
+        return False
+    i = 0
+    while i < len(b) and a[i] == b[i]:
+        i += 1
+    if i == len(b):
+        return True
+    if len(a) > len(b):
+        return a[i + 1 :] == b[i:]
+    return a[i + 1 :] == b[i + 1 :] or (
+        a[i + 1 : i + 2] == b[i : i + 1]
+        and a[i : i + 1] == b[i + 1 : i + 2]
+        and a[i + 2 :] == b[i + 2 :]
+    )
 
 
-def _vocabulary(services: list[dict]) -> set[str]:
+@dataclass(frozen=True)
+class _Vocabulary:
+    words: frozenset[str]
+    ordered: tuple[str, ...]
+
+
+# (services list, its vocabulary); one tuple so a search thread never sees a mixed pair
+_vocabulary_cache: tuple[list[dict], _Vocabulary] | None = None
+
+
+def _vocabulary(services: list[dict]) -> _Vocabulary:
+    """Words of the synonyms and service names worth correcting to; built once per
+    services list (the catalog replaces the list when it changes)."""
+    global _vocabulary_cache
+    cached = _vocabulary_cache
+    if cached is not None and cached[0] is services:
+        return cached[1]
     words = {word for phrase in (*SYNONYMS, *NAME_SYNONYMS) for word in phrase.split()}
     for service in services:
         words.update(normalize(service["name"]).split())
-    return {word for word in words if len(word) >= MIN_TYPO_CHARS}
+    words = {word for word in words if len(word) >= MIN_TYPO_CHARS}
+    vocabulary = _Vocabulary(frozenset(words), tuple(sorted(words)))
+    _vocabulary_cache = (services, vocabulary)
+    return vocabulary
 
 
-def _corrected(word: str, vocabulary: set[str]) -> str:
+def _corrected(word: str, vocabulary: _Vocabulary) -> str:
     """The vocabulary word one typo away from `word` (or from its start, for stems)."""
-    if len(word) < MIN_TYPO_CHARS or word in vocabulary:
+    if len(word) < MIN_TYPO_CHARS or word in vocabulary.words:
         return word
-    for candidate in sorted(vocabulary):
-        if _typo_distance(word, candidate) <= 1:
+    for candidate in vocabulary.ordered:
+        if len(candidate) > len(word) + 1:
+            continue
+        if _within_one_typo(word, candidate):
             return candidate
-        if len(word) > len(candidate) and (
-            _typo_distance(word[: len(candidate)], candidate) <= 1
+        if len(word) > len(candidate) and _within_one_typo(
+            word[: len(candidate)], candidate
         ):
             return candidate
     return word

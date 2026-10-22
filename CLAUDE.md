@@ -48,7 +48,7 @@ python3 telegram_bot.py
 │   │   ├── interaction_tracker.py # Group -2: marks taps on live alerts and queued messages
 │   │   ├── menu_keyboard.py    # Reply keyboard taps (Find, My watches, Settings, Help)
 │   │   ├── text_input.py       # Plain text: typed date answer or service search
-│   │   ├── legacy_callbacks.py # Buttons of messages from before watches; catch-all
+│   │   ├── fallback_callbacks.py # Callbacks without a scheme prefix to their screens; catch-all
 │   │   ├── language_picker.py  # Bilingual language picker
 │   │   └── errors.py           # Application error handler
 │   ├── services/                # Business logic with side effects

@@ -213,7 +213,7 @@ class TestBookTap:
         add_user(db, lang)
         fake_availability.day_results = [result]
 
-        await press(booking.book_legacy, context, "book_2026-10-29_10461_10339028")
+        await press(booking.book_office_day, context, "book_2026-10-29_10461_10339028")
         await context.drain()
 
         assert bot.edits[-1].text == expected
@@ -239,10 +239,12 @@ class TestBookTap:
             ("ru", "❌ Некорректные данные записи. Пожалуйста, попробуйте снова."),
         ],
     )
-    async def test_invalid_legacy_data_toast(self, db, context, bot, lang, expected):
+    async def test_invalid_office_day_data_toast(
+        self, db, context, bot, lang, expected
+    ):
         add_user(db, lang)
 
-        await press(booking.book_legacy, context, "book_2026-13-01_10461_10339028")
+        await press(booking.book_office_day, context, "book_2026-13-01_10461_10339028")
 
         assert toasts(bot) == [expected]
 

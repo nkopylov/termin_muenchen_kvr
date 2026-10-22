@@ -112,6 +112,19 @@ class TestOfficeLabel:
         assert office_label(10489, 1063475, "en") == "Ruppertstraße"
         assert office_label(10313237, 1063475, "en") == "Ruppertstraße"
 
+    def test_office_whose_queue_is_named_differently_is_numbered(self, catalog):
+        third = 20000000
+        catalog["offices"].append({"id": third, "name": "Bürgerbüro Ruppertstraße"})
+        catalog["relations"].append(
+            {"serviceId": 1063475, "officeId": third, "public": True}
+        )
+        for office in catalog["offices"]:
+            if office["id"] in (102522, third):
+                office["sharedBookingOfficeIds"] = [102522, third]
+        assert office_label(third, 1063475, "en") == "Ruppertstraße · 3"
+        assert office_label(10489, 1063475, "en") == "Ruppertstraße · 1"
+        assert office_label(102522, 1063475, "en") == "Orleansplatz"
+
     @pytest.mark.parametrize(
         ("lang", "text"), [(None, "Office 1"), ("ru", "Отделение 1")]
     )

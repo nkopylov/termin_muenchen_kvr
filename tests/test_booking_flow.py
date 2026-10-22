@@ -23,7 +23,7 @@ from src.i18n import t
 from src.munich_api_client import ApiResponse
 from src.repositories import BookingSessionRepository, UserRepository, WatchRepository
 from src.ui.background import user_lock
-from src.ui.callbacks import BOOK_RE, LEGACY_BOOKING_RE, NAV_RE
+from src.ui.callbacks import BOOK_RE, NAV_RE, UNVERSIONED_BOOKING_RE
 from src.ui.keyboard import MENU_FILTER
 from src.watches.slots import SlotTime
 from src.watches.when import PRESETS
@@ -515,7 +515,8 @@ async def app(db, user, catalog, clock, today, fake_availability):
     for handler in (
         CallbackQueryHandler(recorder("nav"), pattern=NAV_RE),
         CallbackQueryHandler(
-            booking.booking_orphan_callback, pattern=f"{BOOK_RE}|{LEGACY_BOOKING_RE}"
+            booking.booking_orphan_callback,
+            pattern=f"{BOOK_RE}|{UNVERSIONED_BOOKING_RE}",
         ),
         MessageHandler(filters.COMMAND, recorder("command")),
         MessageHandler(MENU_FILTER, recorder("menu")),

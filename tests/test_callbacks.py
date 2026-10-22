@@ -108,7 +108,7 @@ def test_oversized_builder_raises():
         (cb.BOOK_DAY_RE, ["b1:17:20261029"], ["b1:t:1:2", "b1:17:2026102"]),
         (cb.BOOK_RE, ["b1:me", "b1:17:20261029"], ["book_x"]),
         (
-            cb.LEGACY_BOOKING_RE,
+            cb.UNVERSIONED_BOOKING_RE,
             ["time_1796292600", "confirm_booking", "cancel_booking"],
             ["time_", "book_2026-10-25_1_2", "b1:x"],
         ),

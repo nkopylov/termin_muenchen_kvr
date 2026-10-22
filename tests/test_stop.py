@@ -69,7 +69,7 @@ def buttons(markup) -> list[list[tuple[str, str]]]:
 
 def full_account(db, clock, user_id=USER, lang="en"):
     """Open watch with a live alert, an ended one with its S17 message, a booking session,
-    a queued retire, a legacy subscription and a nav pointer"""
+    a queued retire, a service_subscriptions row and a nav pointer"""
     add_user(db, lang, user_id)
     with Session(db) as session:
         watches = WatchRepository(session)

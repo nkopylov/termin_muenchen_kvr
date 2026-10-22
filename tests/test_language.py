@@ -50,8 +50,8 @@ from src.commands.start import start_command
 from src.commands.watches import build_watches_screen
 from src.db_models import User
 from src.handlers import text_input
+from src.handlers.fallback_callbacks import fallback_callback
 from src.handlers.language_picker import build_language_picker
-from src.handlers.legacy_callbacks import legacy_callback
 from src.i18n import t
 from src.i18n.user_language import get_user_language, set_user_language
 from src.repositories import UserRepository, WatchRepository
@@ -746,7 +746,7 @@ class TestHandlerRegistration:
         [
             ("lang:ru", language_choice_callback),
             ("language", language_menu_callback),
-            ("main_menu", legacy_callback),
+            ("main_menu", fallback_callback),
         ],
     )
     def test_callbacks_route_to_expected_handler(self, application, data, callback):

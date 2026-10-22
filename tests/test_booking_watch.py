@@ -548,14 +548,14 @@ class TestBookTapEdgeCases:
         )
 
 
-class TestLegacyBookButton:
+class TestBookOfficeDayButton:
     async def test_books_the_office_of_the_button_without_a_watch(
         self, db, user, context, bot, fake_availability
     ):
         fake_availability.day_results = [(SlotTime(ts(10), 10461),)]
 
         state = await tap(
-            booking.book_legacy, context, "book_2026-10-29_10461_10339028", OLD_MSG
+            booking.book_office_day, context, "book_2026-10-29_10461_10339028", OLD_MSG
         )
         await context.drain()
 
@@ -575,7 +575,7 @@ class TestLegacyBookButton:
         fake_availability.day_results = [(SlotTime(ts(10), FORSTENRIEDER),)]
 
         await tap(
-            booking.book_legacy,
+            booking.book_office_day,
             context,
             f"book_2026-10-29_{FORSTENRIEDER}_{WOHNSITZ}",
             OLD_MSG,
@@ -592,7 +592,7 @@ class TestLegacyBookButton:
         fake_availability.day_results = [(SlotTime(ts(10), FORSTENRIEDER),)]
 
         await tap(
-            booking.book_legacy,
+            booking.book_office_day,
             context,
             f"book_2026-10-29_{FORSTENRIEDER}_{WOHNSITZ}",
             OLD_MSG,
@@ -603,7 +603,7 @@ class TestLegacyBookButton:
 
     async def test_impossible_date_gives_a_toast(self, db, user, context, bot):
         state = await tap(
-            booking.book_legacy, context, "book_2026-02-31_10461_10339028", OLD_MSG
+            booking.book_office_day, context, "book_2026-02-31_10461_10339028", OLD_MSG
         )
 
         assert state == ("stop", None)
