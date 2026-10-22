@@ -3,6 +3,7 @@ Munich Appointment Bot - Main Entry Point
 Minimal bot setup that wires together all commands and handlers.
 """
 
+import asyncio
 import logging
 
 from telegram import Update
@@ -16,6 +17,7 @@ from telegram.ext import (
     filters,
 )
 
+from src import services_manager
 from src.commands.booking import (
     booking_conversation,
     booking_orphan_callback,
@@ -97,6 +99,9 @@ async def startup_sequence(application: Application) -> None:
 async def post_init(application: Application) -> None:
     """Post-initialization callback - set bot commands and start time"""
     set_bot_start_time()
+
+    # In a thread: every catalog read on the event loop uses this cache
+    await asyncio.to_thread(services_manager.refresh_catalog)
 
     # Set bot commands for menu
     await set_default_commands(application.bot)

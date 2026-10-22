@@ -148,6 +148,17 @@ class TestSlotsAlert:
             ("📅 Записаться: Чт 29.10", "b1:42:20261029")
         ]
 
+    def test_only_office_of_a_service_is_not_repeated_after_times(self):
+        snap = WatchSnapshot(
+            CHECKED,
+            True,
+            frozenset({Slot(D1, 102101)}),
+            (SlotTime(ts(D1, 8, 0), 102101),),
+        )
+        alert = render_alert(rec(service_id=1064305), snap, "en", initial=True)
+        assert alert.text.endswith("📅 Thu 29.10: 08:00")
+        assert "Car deregistration · KfZ Zulassungsstelle ·" in alert.text
+
     def test_two_days_lists_the_other(self):
         snap = WatchSnapshot(
             CHECKED,
@@ -166,12 +177,12 @@ class TestSlotsAlert:
             (SlotTime(ts(D1, 8, 0), 1),),
         )
         assert render_alert(rec(office_id=1), snap, "ru", initial=False).text.endswith(
-            "\nЕщё свободно: 26.11, 03.12"
+            "\nТакже свободно: 26.11, 03.12"
         )
 
     def test_overflow_plural_ru(self):
         alert = render_alert(rec(), ANY_OFFICE_SNAPSHOT, "ru", initial=False)
-        assert alert.text.endswith("Ещё свободно: 26.11, 03.12 и ещё 2 дня")
+        assert alert.text.endswith("Также свободно: 26.11, 03.12 и ещё 2 дня")
 
     def test_missing_times(self):
         snap = WatchSnapshot(CHECKED, True, frozenset({Slot(D1, 1)}))
@@ -199,7 +210,9 @@ class TestSlotsAlert:
             CHECKED, True, frozenset({Slot(D1, 7)}), (SlotTime(ts(D1, 8, 0), 7),)
         )
         catalog["services"].append({"id": 77, "name": "X <y> & z"})
-        catalog["relations"].append({"serviceId": 77, "officeId": 7, "public": True})
+        catalog["relations"] += [
+            {"serviceId": 77, "officeId": oid, "public": True} for oid in (7, 54261)
+        ]
         alert = render_alert(
             rec(service_id=77, office_id=None), snap, "en", initial=False
         )
@@ -285,3 +298,16 @@ class TestOtherRenders:
     @pytest.mark.parametrize("lang", ["en", "ru"])
     def test_booking_timed_out(self, lang):
         assert render_booking_timed_out(lang) == t("alert.booking_timed_out", lang)
+
+
+@pytest.mark.parametrize("lang", ["en", "ru"])
+def test_outdated_names_no_direction(lang):
+    # The newer message can be above (changed from an older screen) or below
+    text = render_outdated(lang)
+    assert all(word not in text for word in ("below", "above", "ниже", "выше"))
+
+
+@pytest.mark.parametrize("lang", ["en", "ru"])
+def test_deadline_does_not_claim_nothing_was_found(lang):
+    ended = render_ended(rec(end_reason="deadline", status="ended"), lang)
+    assert all(word not in ended.text for word in ("didn't find", "не нашёл"))

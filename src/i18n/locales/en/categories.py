@@ -3,13 +3,13 @@
 
 MESSAGES: dict[str, str | dict[str, str]] = {
     "categories.auslaenderbehoerde": "Ausländerbehörde 🌍",
-    "categories.ausweis": "Ausweis & Pass 🆔",
-    "categories.fahrzeug": "Fahrzeug 🚗",
-    "categories.fuehrerschein": "Führerschein 🪪",
-    "categories.wohnsitz": "Wohnsitz 🏠",
-    "categories.gewerbe": "Gewerbe 💼",
-    "categories.familie": "Familie 👨‍👩‍👧",
-    "categories.soziales": "Rente & Soziales 🏥",
-    "categories.parken": "Parken 🅿️",
-    "categories.sonstiges": "Sonstiges 📋",
+    "categories.ausweis": "ID card & passport 🆔",
+    "categories.fahrzeug": "Vehicles 🚗",
+    "categories.fuehrerschein": "Driving licence 🪪",
+    "categories.wohnsitz": "Residence & address 🏠",
+    "categories.gewerbe": "Business 💼",
+    "categories.familie": "Family 👨‍👩‍👧",
+    "categories.soziales": "Pension & social 🏥",
+    "categories.parken": "Parking 🅿️",
+    "categories.sonstiges": "Other 📋",
 }

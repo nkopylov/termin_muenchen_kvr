@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from src import services_manager
 from src.database import get_session
+from src.handlers.language_picker import client_language
 from src.handlers.text_input import AWAIT_KEY, cancel_markup, clear_pending_input
 from src.i18n import t
 from src.i18n.user_language import get_user_language
@@ -30,12 +31,13 @@ from src.services_manager import CATEGORY_KEYWORDS, categorize_services
 from src.ui import callbacks as cb
 from src.ui.screens import show_screen
 from src.ui.telegram_safe import safe_answer, safe_edit_text, safe_send
-from src.watches.availability import public_office_ids
+from src.watches.availability import office_choices, public_office_ids
 from src.watches.labels import (
     POPULAR_SERVICE_IDS,
     office_label,
     service_label,
     watch_summary,
+    where_text,
 )
 from src.watches.when import PRESETS, WhenSpec
 
@@ -73,7 +75,7 @@ async def _ensure_registered(
     with get_session() as session:
         if UserRepository(session).get_user(user_id) is not None:
             return True
-    text = t("find.not_registered", _lang(update, context))
+    text = t("start.not_registered", client_language(update))
     query = update.callback_query
     if query is not None and query.message is not None:
         await safe_edit_text(
@@ -95,7 +97,8 @@ def build_find_screen(lang: str) -> tuple[str, InlineKeyboardMarkup]:
         for sid in POPULAR_SERVICE_IDS
         if services_manager.get_service_info(sid) is not None
     ]
-    rows = _pairs(popular) + [[_button(t("find.btn_all", lang), cb.find_all())]]
+    rows = [[button] for button in popular]
+    rows.append([_button(t("find.btn_all", lang), cb.find_all())])
     return t("find.title", lang), InlineKeyboardMarkup(rows)
 
 
@@ -192,7 +195,7 @@ async def _show_unavailable(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def _show_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text, markup = build_limit_screen(_lang(update, context))
+    text, markup = build_limit_screen(_lang(update, context), update.effective_user.id)
     await show_screen(update, context, text, markup)
 
 
@@ -215,7 +218,7 @@ async def show_service_step(
         await _show_limit(update, context)
         return
 
-    offices = public_office_ids(service_id)
+    offices = office_choices(service_id)
     if len(offices) == 1:
         await show_when_step(update, context, service_id, None)
         return
@@ -274,11 +277,7 @@ async def show_when_step(
         return
 
     lang = _lang(update, context)
-    where = (
-        t("watch.where_any", lang)
-        if office_id is None
-        else office_label(office_id, service_id, lang)
-    )
+    where = where_text(service_id, office_id, lang)
     text = t(
         "find.when",
         lang,
@@ -294,7 +293,7 @@ async def show_when_step(
 
     back = (
         cb.find_service(service_id)
-        if len(public_office_ids(service_id)) > 1
+        if len(office_choices(service_id)) > 1
         else cb.find_home()
     )
     markup = _when_markup(
@@ -310,7 +309,8 @@ async def _show_edit_when(
     update: Update, context: ContextTypes.DEFAULT_TYPE, rec: WatchRecord
 ) -> None:
     lang = _lang(update, context)
-    text = t("find.when_edit", lang, summary=html.escape(watch_summary(rec, lang)))
+    key = "find.when_edit" if rec.is_open else "find.when_again"
+    text = t(key, lang, summary=html.escape(watch_summary(rec, lang)))
     markup = _when_markup(
         lang,
         lambda preset: cb.find_edit_when(rec.id, preset),
@@ -431,13 +431,17 @@ async def _on_edit(
 async def _on_any_office(
     update: Update, context: ContextTypes.DEFAULT_TYPE, watch_id: int
 ) -> None:
+    """Follow-up of a watch whose office is gone: an any-office watch for its service,
+    saved only once a time is chosen (the ended watch stays as it was)"""
     rec = _own_watch(update.effective_user.id, watch_id)
     if rec is None:
         await _show_home(update, context)
     elif not _service_available(rec.service_id):
         await _show_unavailable(update, context)
+    elif _limit_blocks(update.effective_user.id, rec.service_id):
+        await _show_limit(update, context)
     else:
-        await _switch_to_any_office(update, context, rec.id)
+        await show_when_step(update, context, rec.service_id, None)
 
 
 async def _ask_date(

@@ -38,13 +38,20 @@ async def register_user(user_id: int, username: str | None) -> None:
 async def send_onboarding(
     bot, chat_id: int, user_id: int, lang: str, returning: bool
 ) -> None:
-    """Welcome with the reply keyboard, then the Find screen or My watches"""
-    key = "start.welcome_back" if returning else "start.welcome"
-    welcome, _ = await safe_send(bot, chat_id, t(key, lang), main_keyboard(lang))
+    """Welcome with the reply keyboard, then the Find screen or My watches. A first
+    welcome for someone who already has watches (migrated subscriptions) explains them."""
     with get_session() as session:
-        if welcome is not None:
-            UserRepository(session).set_ui_version(user_id, UI_KEYBOARD_DELIVERED)
         open_watches = WatchRepository(session).count_open(user_id)
+    if returning:
+        text = t("start.welcome_back", lang)
+    elif open_watches:
+        text = t("start.announce", lang, watches=t("keyboard.watches", lang))
+    else:
+        text = t("start.welcome", lang)
+    welcome, _ = await safe_send(bot, chat_id, text, main_keyboard(lang))
+    if welcome is not None:
+        with get_session() as session:
+            UserRepository(session).set_ui_version(user_id, UI_KEYBOARD_DELIVERED)
 
     if open_watches:
         text, markup = watches.build_watches_screen(user_id, lang, when.utcnow())

@@ -287,6 +287,21 @@ class TestBuildScreen:
         assert text.startswith(t("watches.header", "en", count=5, limit=5))
         assert all(data != "f1:home" for row in buttons(markup) for _, data in row)
 
+    def test_grandfathered_watches_above_the_limit(self, db, catalog, clock):
+        from src.db_models import Watch
+
+        add_user(db)
+        services = (1063475, 1063441, 1063453, 1071896, 1064305, 10339028, 10339027)
+        with Session(db) as session:
+            session.add_all(
+                Watch(user_id=USER, service_id=sid, when_kind="asap")
+                for sid in services
+            )
+            session.commit()
+        text, _ = build_watches_screen(USER, "en", clock.now)
+        assert text.startswith(t("watches.header_over", "en", count=7))
+        assert "of 5" not in text
+
 
 @pytest.mark.asyncio
 class TestCommand:
@@ -312,6 +327,13 @@ class TestCommand:
     async def test_unregistered_user(self, db, catalog, clock, bot, ctx):
         await watches_command(make_text_update("/watches", bot=bot), ctx)
         assert [s.text for s in bot.sent] == [t("start.not_registered", "en")]
+
+    async def test_unregistered_user_with_russian_client(
+        self, db, catalog, clock, bot, ctx
+    ):
+        update = make_text_update("/watches", bot=bot, language_code="uk")
+        await watches_command(update, ctx)
+        assert [s.text for s in bot.sent] == [t("start.not_registered", "ru")]
 
 
 @pytest.mark.asyncio
@@ -521,6 +543,24 @@ class TestStopFromAlert:
         assert isinstance(edit.reply_markup, InlineKeyboardMarkup)
         assert get_watch(db, rec.id).status == "active"
         assert nav_pointer(db) is None
+
+    async def test_no_stores_what_the_alert_now_shows(
+        self, db, catalog, clock, bot, ctx
+    ):
+        add_user(db)
+        rec = with_live_alert(db, checked(db, new_watch(db, 1063475), snapshot(clock)))
+
+        await watches_callback(
+            make_callback_update(f"w1:stopn:{rec.id}", message_id=ALERT_MSG, bot=bot),
+            ctx,
+        )
+
+        kept = get_watch(db, rec.id)
+        expected = render_alert(rec, rec.snapshot, "en", initial=False)
+        assert kept.live.message_id == ALERT_MSG
+        assert kept.live.shown == rec.snapshot.slots
+        assert kept.live.render_hash == expected.render_hash
+        assert kept.alerted == rec.snapshot.slots
 
     async def test_yes_finalizes_alert_only(self, db, catalog, clock, bot, ctx):
         add_user(db)

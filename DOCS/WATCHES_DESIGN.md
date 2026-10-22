@@ -128,7 +128,7 @@ Date parsing (`parse_user_date`, whole stripped text must be one token):
 | ISO, padding optional | `2026-11-15`, `2026-1-5` | `strptime("%Y-%m-%d")` |
 | `D.M.YYYY` | `15.11.2026`, `5.1.2027` | |
 | `D.M.YY` | `15.11.26` | year `2000 + YY` |
-| `D.M` | `15.11` | next occurrence: this year's date if `> today`, else next year's |
+| `D.M` | `15.11` | first occurrence on or after `today − 30 days`: a date passed up to 30 days ago stays in the past (a typo gets PAST, a range may start in the past), today stays today, older dates roll to next year |
 
 Invalid calendar dates (31.02, month 13) → None. `parse_date_range` finds date tokens with
 `DATE_TOKEN = r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\.\d{1,2}(?:\.\d{2,4})?"` and requires **exactly two** (any text between
@@ -194,7 +194,9 @@ knowable without one call per day, so R10's "N free slots" is shown as free days
       │ booking succeeded (booking) → ended/booked
       │ Stop (My watches / alert)   → ended/stopped
       ▼
-    ended ── "Extend"/"Search again" (f1:edit) / "Any office" (f1:any) → active, end fields cleared
+    ended ── "Extend"/"Search again" (f1:edit) → active, end fields cleared
+    ended/gone ── "Any office" (f1:any) → when step (S8) for an any-office watch of the service; the ended
+                  watch is kept as it is, nothing changes before a time is chosen
 ```
 
 `Forbidden` on any send/edit → all the user's **active** watches become `paused` with `pause_reason="blocked"`.
@@ -235,6 +237,9 @@ if version < 2:
      is the same horizon, rolling, and never ends with a deadline message). No `subscribed_at` comparison
      (local vs UTC dates differ by a day);
    - `validate_between(start, end, today)`: PAST → asap; TOO_FAR → `end = today + 364`; ok → `between(start, end)`.
+   - `start > today + 364` → `between(start, end)` kept as stored; `effective_window` is then empty
+     (`start > end`), so the checker and the immediate check skip the watch until its start is within the query
+     horizon (the old `/setdates` had no upper bound, so these users asked only for those far dates).
    Dates are written back as ISO (`date.isoformat()`).
 4. Skip the group when an open watch for `(user_id, service_id)` already exists; else INSERT (status active,
    `alerted_slots`/`alert_shown_slots` `'[]'`, timestamps `now`).
@@ -262,10 +267,10 @@ row never stops the checker.
 | `when.py` | 1.3 |
 | `slots.py` | 1.4 |
 | `alert_decision.py` | 6.1 (`Interaction`, `AlertAction`, `AlertDecision`, `interaction_state`, `decide_alert`) |
-| `labels.py` | `POPULAR_SERVICE_IDS: tuple[int, ...]` (R4 order); `service_label(service_id, lang) -> str` (localized short name for popular ids, else German name, ≤ 60 chars, never HTML-escaped); `office_label(office_id, service_id: int \| None = None, lang=None) -> str` (city name; same-name offices of that service get ` · 1`, ` · 2` by id order; unknown id → `watch.office_fallback`); `where_label(rec, lang)`; `when_label(spec, lang)`; `day_label(d, lang) -> "Thu 29.10"`; `date_label(d) -> "15.11.2026"`; `ago_label(delta, lang)`; `watch_summary(rec, lang) -> "<service> · <where> · <when>"`; `watch_state(rec, lang) -> str` |
+| `labels.py` | `POPULAR_SERVICE_IDS: tuple[int, ...]` (R4 order); `service_label(service_id, lang) -> str` (localized short name for popular ids, else German name, ≤ 60 chars, never HTML-escaped); `office_label(office_id, service_id: int \| None = None, lang=None) -> str` (city name; same-name office choices of that service get ` · 1`, ` · 2` by id order, offices sharing a booking queue are labelled as their group's lowest id; unknown id → `watch.office_fallback`); `where_label(rec, lang)` / `where_text(service_id, office_id, lang)` (the office name when the service has only one office choice, else `watch.where_any` for any office); `only_office(service_id) -> int \| None`; `when_label(spec, lang)`; `day_label(d, lang) -> "Thu 29.10"`; `date_label(d) -> "15.11.2026"`; `ago_label(delta, lang)`; `watch_summary(rec, lang) -> "<service> · <where> · <when>"`; `watch_state(rec, lang) -> str` |
 | `alert_view.py` | `render_alert(rec, snapshot, lang, *, initial: bool, updated_existing: bool = False) -> RenderedAlert`; `render_final(rec, final: FinalState, lang) -> str`; `render_outdated(lang) -> str`; `render_empty_now(rec, as_of: datetime, lang) -> RenderedAlert`; `render_ended(rec, lang) -> RenderedAlert` (S17 deadline / S17g gone); `render_booking_timed_out(lang) -> str`. `RenderedAlert(text, markup, kind, render_hash)`. `FinalState = StrEnum("booked","stopped","paused","deadline","gone","outdated")` |
 | `alert_ops.py` | `alert_lock(watch_id) -> asyncio.Lock` (per-watch, process-local); `async close_live_alert(bot, watch_id, final: FinalState, lang, *, by_user: bool) -> None` (caller holds the lock, 6.3); `queue_retire(user_id, chat_id, message_id, text, not_before)`; `async process_pending_retires(bot, now) -> int` (6.3) |
-| `availability.py` | `CallResult(ok: bool, data: dict \| None, error: ApiError \| None)`, `ApiError = StrEnum("token","combination","other")`; `watch_office_ids(rec) -> list[int]` (watch office, or all **public** offices of the service); `public_office_ids(service_id) -> set[int]`; `async fetch_calendar(service_id, office_ids, start, end, slots_day=None) -> CallResult`; `async fetch_day_times(service_id, office_ids, day) -> tuple[SlotTime, ...] \| None`; `async snapshot_for_watch(rec, today) -> WatchSnapshot`. Every call gets `captcha_token.get_token(min_ttl=30)` **right before** the HTTP request (`asyncio.to_thread`); on `ApiError.token` it calls `captcha_token.invalidate()`, gets a new token and retries once |
+| `availability.py` | `CallResult(ok: bool, data: dict \| None, error: ApiError \| None)`, `ApiError = StrEnum("token","combination","other")`; `watch_office_ids(rec) -> list[int]` (watch office plus the public offices sharing its booking queue, or all **public** offices of the service); `public_office_ids(service_id) -> set[int]` (public relations, without offices whose `disabledByServices` lists the service: the website hides them and they return no days); `office_choices(service_id) -> list[int]` (public offices with each `sharedBookingOfficeIds` group collapsed to its lowest id, as the website lists them); `booking_group(service_id, office_id) -> list[int]`; `async fetch_calendar(service_id, office_ids, start, end, slots_day=None) -> CallResult`; `async fetch_day_times(service_id, office_ids, day) -> tuple[SlotTime, ...] \| None` (with the per-office combination fallback); `async snapshot_for_watch(rec, today) -> WatchSnapshot`. Every call gets `captcha_token.get_token(min_ttl=30)` **right before** the HTTP request (`asyncio.to_thread`); on `ApiError.token` it calls `captcha_token.invalidate()`, gets a new token and retries once |
 
 ### 3.2 Foundation: data access, services, UI, wiring
 
@@ -275,7 +280,7 @@ row never stops the checker.
 | `src/database.py` | migration v2 (section 2) |
 | `src/repositories.py` | `WatchRecord` (frozen dataclass: id, user_id, service_id, office_id, when: WhenSpec, status, pause_reason, end_reason, ended_at, last_checked_at, snapshot: WatchSnapshot \| None, alerted: frozenset[Slot], live: LiveAlert \| None, interacted_at). `LiveAlert(chat_id, message_id, kind, sent_at, shown: frozenset[Slot], render_hash)`. `LimitReached(Exception)`. `WatchRepository(session)`: `create_or_update(user_id, service_id, office_id, when) -> tuple[WatchRecord, bool]` (bool = updated existing open watch; creates only below the limit); `find_open(user_id, service_id)`; `count_open(user_id) -> int`; `get(watch_id)`; `get_for_user(watch_id, user_id)`; `list_for_user(user_id, ended_since: datetime \| None) -> list[WatchRecord]` (open first by created_at, then ended with reason booked/deadline/gone since `ended_since`); `list_active()`; `set_when(watch_id, when)` (→ active, clears end/pause fields, alerted=∅; limit check when reopening); `set_office(watch_id, office_id \| None)` (limit check when the watch is ended); `set_status(watch_id, status, *, pause_reason=None, end_reason=None)`; `pause_all_for_user(user_id, reason="blocked") -> int`; `resume_blocked(user_id) -> int`; `record_check(watch_id, snapshot)`; `set_live_alert(watch_id, chat_id, message_id, kind, shown, alerted, render_hash)` (also clears `alert_interacted_at`); `update_live_alert(watch_id, kind, shown, alerted, render_hash)`; `clear_live_alert(watch_id, reset_alerted: bool, alerted: frozenset[Slot] \| None = None)` (**always** clears `alert_interacted_at`); `set_alerted(watch_id, alerted)`; `mark_interaction(chat_id, message_id, at) -> int \| None`; `clear_interaction(watch_id, seen: datetime \| None) -> bool` (`UPDATE … WHERE alert_interacted_at IS :seen`); `counts() -> dict[str, int]`. `PendingRetireRepository`: `add(...)` (upsert on chat/message), `due(now) -> list`, `touch(chat_id, message_id, not_before)`, `discard(chat_id, message_id)`, `reschedule(id, not_before)`, `delete(id)`. `UserRepository`: `set_booking_contact`, `clear_booking_contact`, `set_ui_version(user_id, v)`, `get_nav_message_id`, `set_nav_message_id(user_id, mid \| None)`, `delete_user_cascade(user_id) -> None` (one session: pending_retires, watches, booking_sessions, service_subscriptions, then the user row; `appointment_logs` has no user column). `BookingSessionRepository`: `create_session(..., watch_id=None, message_id=None)`, `update_session(..., office_id=None, message_id=None)`, `is_user_in_booking` becomes **read-only** (`expires_at > now`, no delete), `get_active(user_id) -> BookingSessionRecord \| None` (None when expired), `message_ids_in_booking(now) -> set[tuple[int, int]]`, `pop_expired_sessions() -> list[BookingSessionRecord]` (returns then deletes), `pop_all_sessions() -> list[BookingSessionRecord]` |
 | `src/munich_api_client.py` | add `get_result(endpoint, params) -> ApiResponse` and `post_result(endpoint, data) -> ApiResponse`, `ApiResponse(data: dict \| None, status: int \| None, error_codes: tuple[str, ...])` parsed from `errors[].errorCode` of 4xx bodies; `get`/`post` unchanged |
-| `src/services_manager.py` | office fallback label via `t("watch.office_fallback")` (the `buttons` area goes away); `refresh_catalog() -> bool` (re-fetches the payload, replaces caches only on success; the checker calls it every 6 h) |
+| `src/services_manager.py` | office fallback label via `t("watch.office_fallback")` (the `buttons` area goes away); `refresh_catalog() -> bool` (re-fetches the payload, replaces caches only on success; `post_init` runs it in a thread, the checker every 6 h, or every minute while no catalog is loaded); `get_full_payload`/`get_services` only read the cache, never fetch (they run on the event loop); `catalog_loaded() -> bool` |
 | `src/services/captcha_token.py` | `async get_token(min_ttl: float = 30.0) -> str \| None` (cached token if ≥ `min_ttl` s left, else solves a new one under an `asyncio.Lock`; TTL 280 s; None on failure); `invalidate() -> None`; `last_solve_ms() -> int \| None`; `is_token_error(codes) -> bool` (`captchaInvalid`, `captchaExpired`, `captchaMissing`) |
 | `src/ui/telegram_safe.py` | `EditOutcome = StrEnum("ok","not_modified","gone","forbidden","failed")`; `async safe_edit_text(bot, chat_id, message_id, text, markup=None, parse_mode="HTML") -> EditOutcome`; `async safe_strip_markup(bot, chat_id, message_id) -> EditOutcome`; `async safe_delete(bot, chat_id, message_id) -> bool`; `async safe_send(bot, chat_id, text, markup=None, silent=False) -> tuple[Message \| None, EditOutcome]`; `async safe_answer(query, text=None, show_alert=False) -> bool` (swallows "Query is too old…" / "query id is invalid"); `classify(exc) -> EditOutcome` ("message is not modified" → not_modified; "message to edit not found", "message can't be edited", "message to delete not found" → gone; `Forbidden` → forbidden; `RetryAfter` (after the limiter's retries), network, else → failed). Never raises Telegram errors |
 | `src/ui/background.py` | `user_lock(user_id) -> asyncio.Lock`; `run_for_user(context, update, user_id, coro) -> None` (`context.application.create_task(_locked(coro), update=update)`; per-user lock keeps one user's slow tasks in order; exceptions go to the error handler) |
@@ -377,7 +382,7 @@ then **one** task `startup_sequence(application)` that awaits `announce_new_ui(b
 | `f1:edit:<wid>` | A | when step for an existing watch (Change time, Extend, Search again) |
 | `f1:ewhen:<wid>:<p>` | A | preset for existing watch |
 | `f1:edate:<wid>:<m>` | A | typed date for existing watch |
-| `f1:any:<wid>` | A | ended/gone watch: switch to any office, then when step (S8) |
+| `f1:any:<wid>` | A | ended/gone watch: when step (S8) for the service with any office (limit checked first); the time choice creates/updates the open watch, the ended one is not changed |
 | `f1:x` | A | cancel typed-date prompt |
 | `w1:list` | B | My watches |
 | `w1:pause:<wid>` / `w1:resume:<wid>` | B | pause / resume |
@@ -426,15 +431,15 @@ become the nav pointer. Key names are listed without values; values are written 
 |---|---|---|---|---|
 | S1 | Language picker | `/start` new user, gate | unchanged | unchanged |
 | S2 | Welcome (2 lines) | after first language choice / `/start` (B `send_onboarding`) | `start.welcome` / `start.welcome_back` | reply keyboard |
-| S3 | Find: "What do you need?" + type-to-search hint | S2 follow-up (new users, returning users with 0 open watches; returning users with watches get S18 instead), `/find`, reply Find, `f1:home` (A) | `find.title` | 8 popular (2/row, emoji + `watch.svc_<id>`, missing ids skipped) → `f1:svc`; `find.btn_all` → `f1:all` |
+| S3 | Find: "What do you need?" + type-to-search hint | S2 follow-up (new users, returning users with 0 open watches; returning users with watches get S18 instead), `/find`, reply Find, `f1:home` (A) | `find.title` | 8 popular (1/row, so long labels are not cut, emoji + `watch.svc_<id>`, missing ids skipped) → `f1:svc`; `find.btn_all` → `f1:all` |
 | S4 | Search results | plain text (A `on_text`) | `find.results` (`{query}`), `find.nothing` | ≤ 8 services (popular label or truncated German name) → `f1:svc`; `find.btn_all` |
 | S5 | Categories | `f1:all` | `find.categories` | `categories.<id> (n)` 2/row → `f1:cat:<id>:0`; `find.btn_back` → `f1:home` |
 | S6 | Category page | `f1:cat` | `find.category_page` (`{category}`, `{first}`, `{last}`, `{total}`) | 10 services → `f1:svc`; prev/next; back → `f1:all` |
-| S7 | Office | `f1:svc` when > 1 public office | `find.where` (`{service}`) | `find.btn_any_office` → `f1:off:<sid>:0`; ≤ 10 offices sorted by label, 2/row → `f1:off`; back → `f1:home` |
-| S8 | When | `f1:off`, `f1:svc` with 1 office, `f1:edit`, `f1:any` | `find.when` (`{service}`, `{where}`), `find.when_edit`, `find.when_existing` (hint when the service already has an open watch) | `find.btn_asap`, `find.btn_2w`, `find.btn_1m`, `find.btn_3m` (2/row), `find.btn_before`, `find.btn_between`, back |
+| S7 | Office | `f1:svc` when > 1 office choice (`office_choices`: offices sharing a booking queue are one choice, as on the city website) | `find.where` (`{service}`) | `find.btn_any_office` → `f1:off:<sid>:0`; ≤ 10 offices sorted by label, 2/row → `f1:off`; back → `f1:home` |
+| S8 | When | `f1:off`, `f1:svc` with 1 office, `f1:edit`, `f1:any` | `find.when` (`{service}`, `{where}`: the office name when the service has only one), `find.when_edit` (open watch) / `find.when_again` (ended watch), `find.when_existing` (hint when the service already has an open watch) | `find.btn_asap`, `find.btn_2w`, `find.btn_1m`, `find.btn_3m` (2/row), `find.btn_before`, `find.btn_between`, back |
 | S9 | Typed date prompt | `f1:date`, `f1:edate` | `find.ask_before`, `find.ask_range` (examples: `15.11`, `15.11.2026`, `2026-11-15`) | `find.btn_cancel` → `f1:x` |
 | S9e | Typed date error | `on_text` while awaiting, text with digits | `find.date_format`, `find.date_past`, `find.date_too_far`, `find.date_order` | `find.btn_cancel` (previous prompt stripped by `show_screen`) |
-| S10 | Limit reached | `f1:svc` for a new service / creation / reopen with 5 open (`LimitReached`) | `find.limit` | `keyboard.watches` text → `w1:list` |
+| S10 | Limit reached | `f1:svc` for a new service / creation / reopen with 5 open (`LimitReached`) | `find.limit`; `find.limit_over` (`{open}`, `{limit}`, `{count}` to stop) for grandfathered users above 5, whose My watches header is `watches.header_over` | `keyboard.watches` text → `w1:list` |
 | S11 | Checking… | creation (A) | `find.checking` (`{service}`) | none |
 | S12 | Alert, slots | S11 result or checker push (render: F) | `alert.slots` (`{summary}`, `{day}`, `{times}`, `{more}`), `alert.updated_existing` prefix after an upsert | ≤ 3 `alert.btn_book` (`{day}`) → `b1:<wid>:<day>` (earliest first, 1 per row); `alert.btn_website` (url); `alert.btn_stop` → `w1:stop:<wid>` |
 | S13 | Alert, none yet | S11 result with no slots | `alert.none_yet` (`{summary}`) | none |
@@ -490,7 +495,7 @@ Search (`service_search`): `normalize` = casefold, `ä→a ö→o ü→u ß→ss
 sides, so "fuehrerschein", "führerschein", "fuhrerschein" match), split on non-alphanumerics. A service matches when
 every query token (≥ 2 chars) is a substring of its normalized name or a synonym phrase maps to it. Order: synonym
 hits (popular order), then popular, then names starting with the first token, then shorter names. Query > 60 chars
-truncated; < 2 chars → `find.nothing`. Unregistered user (no `users` row) → `find.not_registered` ("send /start").
+truncated; < 2 chars → `find.nothing`. Unregistered user (no `users` row) → `start.not_registered` in the Telegram client's language (`client_language`), like every other entry point.
 
 ---
 
@@ -601,7 +606,7 @@ hold `alert_lock(watch_id)`. `mark_interaction`/`clear_interaction` are single c
 
 | Event | Who | Effect on lifecycle |
 |---|---|---|
-| Watch created / time changed / extended / any office | A | foreground: S11 on the target (edit) or new message; background (`run_for_user`): `create_or_update`/`set_when` (S10 on `LimitReached`), then **without an await in between** acquire `alert_lock(watch_id)`: close previous live with `outdated` (`by_user=True`) unless it is the target message, `snapshot_for_watch`, `record_check`, edit target to S12/S13/S13f, `set_live_alert` (alerted = shown = slots), `forget_nav_message(user_id, target)` |
+| Watch created / time changed / extended / any office | A | foreground: S11 on the target (edit) or new message; background (`run_for_user`): `create_or_update`/`set_when` (S10 on `LimitReached`), mark the watch as running an immediate check (the checker's `apply_alert` leaves it alone meanwhile), `snapshot_for_watch` **without** the lock (handlers that take `alert_lock` must never wait for the city), then under `alert_lock(watch_id)`: re-read; paused/ended meanwhile → target gets that final text and nothing else happens; else close previous live with `outdated` (`by_user=True`) unless it is the target message, `record_check`, edit target to S12/S13/S13f, `set_live_alert` (alerted = shown = slots), `forget_nav_message(user_id, target)` |
 | Book tapped on the live alert | D | under `alert_lock`: `clear_live_alert(reset_alerted=True)` (also clears `alert_interacted_at`), edit to S25; message now belongs to booking; booking session → DEFER |
 | Book tapped on a queued (outdated-pending) message | D | under `alert_lock`: `PendingRetireRepository.discard(chat, msg)`, edit to S25 |
 | Booking ends without success | D | session deleted; next cycle: live N, alerted ∅ → row 2 (new alert) |
@@ -662,7 +667,9 @@ The token cache is shared with A and D (`captcha_token`), so the checker no long
 `times = fetch_day_times(service, watch_office_ids(rec), day)` (fresh token inside availability, never one stored at
 notification time); none → S26g, delete session; else `increment_bookings_started`, S26.
 
-8.2 Legacy entry `book_<date>_<oid>_<sid>` (old alerts): same flow with `watch_id=None`, offices `{oid}`.
+8.2 Legacy entry `book_<date>_<oid>_<sid>` (old alerts): same flow with offices `{oid}`; `watch_id` = the user's
+open watch for `sid` when its office is any or covers `oid` (so a success ends it as booked), else None.
+Day times use the per-office combination fallback (7 step 5), like the checker.
 
 8.3 `b1:t:<oid>:<ts>`: `update_session(timestamp, office_id=oid)`. Saved contact on the user → S27; else ask name
 (existing). `b1:chg` → ask name → email → confirm (existing validation). `b1:me`/`b1:ok` → book.
@@ -722,7 +729,9 @@ command menus. Status screen, global date range, inline main menu and every "sub
 9.3 Existing users: `announce_new_ui(bot)` (startup sequence, before the checker): for users with a chosen language
 and `ui_version < 1`: `set_chat_commands`; with open watches → send S31 with the reply keyboard, `ui_version = 2`;
 without → `ui_version = 1` (they get the keyboard through `presence` on their next update). Users without a language
-(reset by migration v1) are skipped; their language choice runs onboarding (`ui_version = 2`). Idempotent.
+(reset by migration v1) and with open watches get the language picker (`ui_version = 1`); their first choice runs
+onboarding with S31 instead of `start.welcome` (`send_onboarding`: first welcome + open watches), `ui_version = 2`.
+Idempotent.
 `Forbidden` → `ui_version = 2`, `pause_all_for_user("blocked")`. Pacing by the rate limiter.
 
 9.4 Removed in the integration step only (streams must not remove keys from `common`, `menu`, `buttons`): catalog

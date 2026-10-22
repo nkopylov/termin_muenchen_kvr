@@ -178,10 +178,15 @@ class TestStartup:
         monkeypatch.setattr(
             telegram_bot, "end_all_booking_sessions", end_all_booking_sessions
         )
+        monkeypatch.setattr(
+            telegram_bot.services_manager,
+            "refresh_catalog",
+            lambda: calls.append("catalog") or True,
+        )
 
         await telegram_bot.post_init(App())
 
-        assert calls == ["start", "commands", "bookings"]
+        assert calls == ["start", "catalog", "commands", "bookings"]
         assert [c.__name__ for c in created] == ["startup_sequence"]
 
     async def test_announcement_before_checker(self, monkeypatch):

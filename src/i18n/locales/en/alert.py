@@ -22,7 +22,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "🔎 <b>Watching</b>\n{summary}\n\n"
         "😕 No free slots right now (as of {time}). I'm still watching."
     ),
-    "alert.outdated": "⌛ Outdated — see the newer message below.",
+    "alert.outdated": "⌛ Outdated — this watch continues in a newer message.",
     "alert.final_booked": "✅ <b>Booked</b>\n{summary}\n\nThis watch is finished.",
     "alert.final_stopped": "⏹ <b>Stopped watching</b>\n{summary}",
     "alert.final_paused": "⏸ <b>Paused</b>\n{summary}\n\nYou can resume it in My watches.",
@@ -33,7 +33,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     ),
     "alert.deadline": (
         "⌛ <b>Your watch has ended</b>\n{summary}\n\n"
-        "The date has passed and I didn't find a free slot in time."
+        "The date has passed. Extend the watch or start a new search."
     ),
     "alert.gone": (
         "⚠️ <b>Your watch has ended</b>\n{summary}\n\n"

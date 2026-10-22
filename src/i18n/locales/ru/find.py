@@ -14,7 +14,6 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "Попробуйте другое слово (по-русски, по-английски или по-немецки) "
         "или посмотрите все услуги."
     ),
-    "find.not_registered": "Сначала отправьте /start.",
     "find.categories": "📚 <b>Все услуги</b>\nВыберите категорию:",
     "find.category_page": "<b>{category}</b>\nУслуги {first}–{last} из {total}:",
     "find.btn_prev": "⬅️ Предыдущие",
@@ -27,6 +26,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "find.btn_any_office": "🏢 Любое отделение",
     "find.when": "🗓 <b>{service}</b> · {where}\nКогда вам нужна запись?",
     "find.when_edit": "🗓 <b>Изменить время</b>\n{summary}\n\nКогда вам нужна запись?",
+    "find.when_again": "🔁 <b>Искать снова</b>\n{summary}\n\nКогда вам нужна запись?",
     "find.when_existing": (
         "ℹ️ У вас уже есть поиск по этой услуге. Ваш выбор обновит его."
     ),
@@ -72,5 +72,9 @@ MESSAGES: dict[str, str | dict[str, str]] = {
             "Остановите один из них в разделе «Мои поиски», чтобы начать новый."
         ),
     },
-    "find.checking": "🔎 Проверяю <b>{service}</b>…",
+    "find.limit_over": (
+        "✋ Сейчас поисков: {open}, а максимум — {limit}. "
+        "Остановите {count} из них в разделе «Мои поиски», чтобы начать новый."
+    ),
+    "find.checking": "🔎 Ищу свободные записи: <b>{service}</b>…",
 }

@@ -225,6 +225,21 @@ class TestEnds:
         assert get(db, watch_id).end_reason == "gone"
         assert fake_availability.calendar_calls == []
 
+    async def test_range_beyond_the_horizon_is_kept_and_not_queried(
+        self, db, bot, fake_availability
+    ):
+        add_user(db, U1)
+        later = WhenSpec(
+            "between", date_from=date(2028, 1, 1), date_to=date(2028, 2, 1)
+        )
+        watch_id = add_watch(db, U1, when=later)
+
+        result = await cycle(bot)
+
+        assert get(db, watch_id).status == "active"
+        assert fake_availability.calendar_calls == []
+        assert bot.calls == [] and result.ended == 0
+
     async def test_unloaded_catalog_ends_nothing(
         self, db, bot, fake_availability, monkeypatch
     ):
@@ -588,6 +603,17 @@ class TestHousekeeping:
         await cycle(bot, now=NOW + timedelta(hours=6))
         await cycle(bot, now=NOW + timedelta(hours=7))
         assert fresh_checker_state == [1]
+
+    async def test_unloaded_catalog_retried_every_minute(
+        self, db, bot, fresh_checker_state, monkeypatch
+    ):
+        monkeypatch.setattr(services_manager, "_full_payload_cache", None)
+        monkeypatch.setattr(services_manager, "_services_cache", None)
+        await cycle(bot, now=NOW)
+        await cycle(bot, now=NOW + timedelta(seconds=30))
+        assert fresh_checker_state == [1]
+        await cycle(bot, now=NOW + timedelta(minutes=1))
+        assert fresh_checker_state == [1, 1]
 
 
 ADMIN = 999000

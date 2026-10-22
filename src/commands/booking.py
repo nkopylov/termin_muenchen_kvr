@@ -195,12 +195,12 @@ def _berlin(timestamp: int) -> datetime:
 
 
 def format_time_on_date(dt: datetime, lang: str) -> str:
-    """Slot time with its ISO date, e.g. "10:30 on 2025-01-15"."""
+    """Slot time with its day, e.g. "Wed 15.01, 10:30"."""
     return t(
         "booking.time_on_date",
         lang,
         time=dt.strftime("%H:%M"),
-        date=dt.strftime("%Y-%m-%d"),
+        date=day_label(dt.date(), lang),
     )
 
 
@@ -229,7 +229,7 @@ def time_button_label(
 def times_markup(
     times: tuple[SlotTime, ...], service_id: int, show_office: bool, lang: str
 ) -> InlineKeyboardMarkup:
-    """Time buttons, two per row, then Cancel"""
+    """Time buttons, two per row (one per row with office names), then Cancel"""
     buttons = [
         InlineKeyboardButton(
             time_button_label(slot, service_id, show_office, lang),
@@ -237,7 +237,8 @@ def times_markup(
         )
         for slot in times[:MAX_TIME_BUTTONS]
     ]
-    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    per_row = 1 if show_office else 2
+    rows = [buttons[i : i + per_row] for i in range(0, len(buttons), per_row)]
     rows.append(
         [
             InlineKeyboardButton(
@@ -253,20 +254,8 @@ def _cancel_markup(lang: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    t("booking.btn_cancel_booking", lang),
+                    t("booking.btn_cancel", lang),
                     callback_data=cb.book_cancel(),
-                )
-            ]
-        ]
-    )
-
-
-def _done_markup(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("keyboard.watches", lang), callback_data=cb.watches_list()
                 )
             ]
         ]
@@ -327,16 +316,28 @@ async def book_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> NoR
         await safe_answer(query, t("booking.invalid_data", lang))
         raise ApplicationHandlerStop(None) from None
 
+    service_id, office_id = int(service_raw), int(office_raw)
     await _start_booking(
         update,
         context,
         lang,
-        service_id=int(service_raw),
-        office_ids=[int(office_raw)],
-        session_office_id=int(office_raw),
+        service_id=service_id,
+        office_ids=[office_id],
+        session_office_id=office_id,
         day=day,
-        watch_id=None,
+        watch_id=_legacy_watch_id(user_id, service_id, office_id),
     )
+
+
+def _legacy_watch_id(user_id: int, service_id: int, office_id: int) -> int | None:
+    """The open watch that took over the subscription the old alert was sent for"""
+    with get_session() as session:
+        rec = WatchRepository(session).find_open(user_id, service_id)
+    if rec is None:
+        return None
+    if rec.office_id is None or office_id in availability.watch_office_ids(rec):
+        return rec.id
+    return None
 
 
 def _detach(watch_id: int, chat_id: int, message_id: int) -> None:
@@ -469,10 +470,15 @@ async def _show_times(
         chat_id,
         message_id,
         t("booking.select_time", lang, date=label),
-        times_markup(times, service_id, len(office_ids) > 1, lang),
+        times_markup(times, service_id, _several_places(service_id, office_ids), lang),
     )
     if outcome in (EditOutcome.GONE, EditOutcome.FORBIDDEN):
         _end_session_of(user_id, message_id)
+
+
+def _several_places(service_id: int, office_ids: list[int]) -> bool:
+    """Whether the times can be at different places (offices sharing a queue are one)"""
+    return len({office_label(o, service_id) for o in office_ids}) > 1
 
 
 # Conversation steps
@@ -784,8 +790,12 @@ async def leave_booking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
         delete_booking_session(user_id)
         if session.message_id is not None:
-            await safe_strip_markup(
-                context.bot, update.effective_chat.id, session.message_id
+            # Its question must not stay: a typed answer would now become a search
+            await safe_edit_text(
+                context.bot,
+                update.effective_chat.id,
+                session.message_id,
+                t("booking.cancelled", get_user_language(user_id, context)),
             )
     return END
 
@@ -833,7 +843,7 @@ async def _book(
         )
     except Exception as e:  # noqa: BLE001 - the user must always get a final message
         logger.error(f"Booking error: {e}")
-        text = t("booking.error", lang, error=html.escape(str(e)))
+        text = t("booking.error", lang)
     else:
         duration_ms = int((when.utcnow() - booking_start_time).total_seconds() * 1000)
         if result:
@@ -859,9 +869,7 @@ async def _book(
     if not result and _still_watching(session.user_id, session.watch_id):
         text += "\n\n" + t("booking.will_update", lang)
 
-    # The success text stays without buttons: My watches would replace it in place
-    markup = None if result else _done_markup(lang)
-    await safe_edit_text(bot, chat_id, message_id, text, markup)
+    await safe_edit_text(bot, chat_id, message_id, text)
     # Removing the session resumes alerts; after the final text, so none arrives before it
     _end_session_of(session.user_id, message_id)
 

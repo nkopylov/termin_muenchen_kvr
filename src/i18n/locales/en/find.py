@@ -13,7 +13,6 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "😕 I found nothing for <b>{query}</b>.\n"
         "Try another word (English, German or Russian) or browse all services."
     ),
-    "find.not_registered": "Please send /start first.",
     "find.categories": "📚 <b>All services</b>\nChoose a category:",
     "find.category_page": "<b>{category}</b>\nServices {first}–{last} of {total}:",
     "find.btn_prev": "⬅️ Previous",
@@ -27,6 +26,9 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "find.when": "🗓 <b>{service}</b> · {where}\nWhen do you need the appointment?",
     "find.when_edit": (
         "🗓 <b>Change the time</b>\n{summary}\n\nWhen do you need the appointment?"
+    ),
+    "find.when_again": (
+        "🔁 <b>Search again</b>\n{summary}\n\nWhen do you need the appointment?"
     ),
     "find.when_existing": (
         "ℹ️ You already have a watch for this service. Your choice will update it."
@@ -69,5 +71,9 @@ MESSAGES: dict[str, str | dict[str, str]] = {
             "Stop one of them in My watches to start a new one."
         ),
     },
+    "find.limit_over": (
+        "✋ You have {open} watches, but the maximum is {limit}. "
+        "Stop {count} of them in My watches to start a new one."
+    ),
     "find.checking": "🔎 Checking <b>{service}</b>…",
 }

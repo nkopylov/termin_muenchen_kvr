@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from src import services_manager
 from src.database import get_session
+from src.handlers.language_picker import client_language
 from src.i18n import t
 from src.i18n.user_language import get_user_language
 from src.repositories import UserRepository
@@ -76,7 +77,9 @@ async def _search(
         registered = UserRepository(session).get_user(user_id) is not None
     if not registered:
         await safe_send(
-            context.bot, update.effective_chat.id, t("find.not_registered", lang)
+            context.bot,
+            update.effective_chat.id,
+            t("start.not_registered", client_language(update)),
         )
         return
 

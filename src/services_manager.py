@@ -55,18 +55,6 @@ _services_cache = None
 _full_payload_cache = None
 
 
-def fetch_services() -> list[dict] | None:
-    """Fetch all available services from API"""
-    services = get_full_payload().get("services", [])
-
-    if services:
-        logger.info(f"Fetched {len(services)} services from API")
-        return services
-    else:
-        logger.error("Failed to fetch services")
-        return None
-
-
 def fetch_full_payload() -> dict | None:
     """
     Fetch the complete offices-and-services payload.
@@ -99,19 +87,18 @@ def refresh_catalog() -> bool:
     return True
 
 
+def catalog_loaded() -> bool:
+    return bool(_services_cache)
+
+
 def get_services() -> list[dict]:
-    """Get services (cached)"""
-    global _services_cache
-    if _services_cache is None:
-        _services_cache = fetch_services()
+    """Cached services; empty until refresh_catalog has succeeded (never fetches, since
+    callers run on the event loop)"""
     return _services_cache or []
 
 
 def get_full_payload() -> dict:
-    """Get full payload (cached)"""
-    global _full_payload_cache
-    if _full_payload_cache is None:
-        _full_payload_cache = fetch_full_payload()
+    """Cached catalog; empty until refresh_catalog has succeeded (never fetches)"""
     return _full_payload_cache or {"offices": [], "services": [], "relations": []}
 
 

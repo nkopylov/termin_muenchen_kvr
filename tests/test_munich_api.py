@@ -11,7 +11,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from src.services_manager import get_full_payload
+from src.services_manager import get_full_payload, refresh_catalog
 from src.termin_tracker import (
     build_captcha_payload,
     get_available_days,
@@ -92,6 +92,7 @@ def bookable_service():
     import asyncio
 
     token = asyncio.run(get_fresh_captcha_token())
+    assert refresh_catalog()
     payload = get_full_payload()
     start = date.today().isoformat()
     end = (date.today() + timedelta(days=90)).isoformat()
@@ -152,6 +153,7 @@ async def test_watch_calendar_for_all_public_offices_of_a_service():
     from src.watches import availability
 
     service_id = 1063475  # Wohnsitzanmeldung: 7 public offices
+    assert refresh_catalog()
     offices = sorted(availability.public_office_ids(service_id))
     assert len(offices) >= 2
     captcha_token.invalidate()

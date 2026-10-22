@@ -494,7 +494,8 @@ class TestBookTapEdgeCases:
         await context.drain()
 
         assert [e.text for e in edits_of(bot, LIVE_MSG)] == [
-            t("booking.fetching_slots", "en", date="Thu 29.10")
+            t("booking.fetching_slots", "en", date="Thu 29.10"),
+            t("booking.cancelled", "en"),
         ]
 
     async def test_replaced_booking_does_not_get_the_old_times(
@@ -539,6 +540,40 @@ class TestLegacyBookButton:
             "10:00",
             f"b1:t:10461:{ts(10)}",
         )
+
+    @pytest.mark.parametrize("watch_office", [None, FORSTENRIEDER])
+    async def test_belongs_to_the_open_watch_of_its_service(
+        self, db, user, context, fake_availability, watch_office
+    ):
+        watch_id = make_watch(db, office_id=watch_office)
+        fake_availability.day_results = [(SlotTime(ts(10), FORSTENRIEDER),)]
+
+        await tap(
+            booking.book_legacy,
+            context,
+            f"book_2026-10-29_{FORSTENRIEDER}_{WOHNSITZ}",
+            OLD_MSG,
+        )
+        await context.drain()
+
+        assert get_booking(db)[:3] == (watch_id, FORSTENRIEDER, OLD_MSG)
+        assert fake_availability.day_calls == [(WOHNSITZ, [FORSTENRIEDER], DAY)]
+
+    async def test_watch_of_another_office_is_not_its_watch(
+        self, db, user, context, fake_availability
+    ):
+        make_watch(db, office_id=ORLEANSPLATZ)
+        fake_availability.day_results = [(SlotTime(ts(10), FORSTENRIEDER),)]
+
+        await tap(
+            booking.book_legacy,
+            context,
+            f"book_2026-10-29_{FORSTENRIEDER}_{WOHNSITZ}",
+            OLD_MSG,
+        )
+        await context.drain()
+
+        assert get_booking(db)[:3] == (None, FORSTENRIEDER, OLD_MSG)
 
     async def test_impossible_date_gives_a_toast(self, db, user, context, bot):
         state = await tap(
@@ -663,7 +698,9 @@ class TestBookingResult:
         assert stats["completed"] == 0
         final = edits_of(bot, LIVE_MSG)[-1]
         assert final.text.endswith("\n\n" + t("booking.will_update", "en"))
-        assert buttons(final.reply_markup) == [(t("keyboard.watches", "en"), "w1:list")]
+        # No My watches button: nothing would retire it (the reply keyboard has one)
+        assert final.reply_markup is None
+        assert "boom" not in final.text
         if outcome is not None:
             assert [
                 r.getMessage() for r in caplog.records if r.name == booking.__name__

@@ -3,6 +3,8 @@
 
 import asyncio
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from src.database import get_session
@@ -21,10 +23,27 @@ logger = logging.getLogger(__name__)
 
 MAX_RETIRE_ATTEMPTS = 6
 
+_immediate_checks: set[int] = set()
+
 
 def alert_lock(watch_id: int) -> asyncio.Lock:
     """Held by every writer of a watch's live-alert fields."""
     return keyed_lock("alert", watch_id)
+
+
+@contextmanager
+def running_immediate_check(watch_id: int) -> Iterator[None]:
+    """Marks a watch whose check right after a user change is running; the checker
+    leaves its alert alone meanwhile, since that check shows the newer result."""
+    _immediate_checks.add(watch_id)
+    try:
+        yield
+    finally:
+        _immediate_checks.discard(watch_id)
+
+
+def immediate_check_running(watch_id: int) -> bool:
+    return watch_id in _immediate_checks
 
 
 def queue_retire(

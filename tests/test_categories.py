@@ -13,15 +13,15 @@ from src.services_manager import (
 
 ENGLISH_LABELS = {
     "auslaenderbehoerde": "Ausländerbehörde 🌍",
-    "ausweis": "Ausweis & Pass 🆔",
-    "fahrzeug": "Fahrzeug 🚗",
-    "fuehrerschein": "Führerschein 🪪",
-    "wohnsitz": "Wohnsitz 🏠",
-    "gewerbe": "Gewerbe 💼",
-    "familie": "Familie 👨‍👩‍👧",
-    "soziales": "Rente & Soziales 🏥",
-    "parken": "Parken 🅿️",
-    "sonstiges": "Sonstiges 📋",
+    "ausweis": "ID card & passport 🆔",
+    "fahrzeug": "Vehicles 🚗",
+    "fuehrerschein": "Driving licence 🪪",
+    "wohnsitz": "Residence & address 🏠",
+    "gewerbe": "Business 💼",
+    "familie": "Family 👨‍👩‍👧",
+    "soziales": "Pension & social 🏥",
+    "parken": "Parking 🅿️",
+    "sonstiges": "Other 📋",
 }
 
 SERVICES = [

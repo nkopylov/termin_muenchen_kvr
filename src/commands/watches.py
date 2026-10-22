@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.handlers import text_input
+from src.handlers.language_picker import client_language
 from src.i18n import t
 from src.i18n.user_language import get_stored_language, get_user_language
 from src.repositories import (
@@ -23,6 +24,7 @@ from src.services.analytics_service import track_event
 from src.ui import callbacks as cb
 from src.ui.screens import show_screen
 from src.ui.telegram_safe import (
+    EditOutcome,
     safe_answer,
     safe_edit_text,
     safe_send,
@@ -93,7 +95,12 @@ def build_watches_screen(
         return t("watches.empty", lang), InlineKeyboardMarkup([[find]])
 
     shown = list(enumerate(open_watches + ended, 1))
-    header = t("watches.header", lang, count=len(open_watches), limit=MAX_OPEN_WATCHES)
+    if len(open_watches) > MAX_OPEN_WATCHES:
+        header = t("watches.header_over", lang, count=len(open_watches))
+    else:
+        header = t(
+            "watches.header", lang, count=len(open_watches), limit=MAX_OPEN_WATCHES
+        )
     lines = [header] + [_line(rec, n, lang, now) for n, rec in shown]
     rows = [row for n, rec in shown if (row := _row(rec, n, lang))]
     if len(open_watches) < MAX_OPEN_WATCHES:
@@ -113,9 +120,10 @@ async def watches_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text_input.clear_pending_input(context)
     user_id = update.effective_user.id
     if get_stored_language(user_id) is None:
-        lang = get_user_language(user_id, context)
         await safe_send(
-            context.bot, update.effective_chat.id, t("start.not_registered", lang)
+            context.bot,
+            update.effective_chat.id,
+            t("start.not_registered", client_language(update)),
         )
         return
     await _show_list(update, context)
@@ -215,14 +223,26 @@ async def _keep(update, context, rec: WatchRecord, lang: str) -> None:
         current = _reread(rec.id, rec.user_id)
         if current is None or current.snapshot is None:
             return
-        rendered = render_alert(current, current.snapshot, lang, initial=False)
-        await safe_edit_text(
+        snapshot = current.snapshot
+        rendered = render_alert(current, snapshot, lang, initial=False)
+        outcome = await safe_edit_text(
             context.bot,
             update.effective_chat.id,
             _pressed_id(update),
             rendered.text,
             rendered.markup,
         )
+        if outcome in (EditOutcome.OK, EditOutcome.NOT_MODIFIED) and _is_live_alert(
+            current, update
+        ):
+            with get_session() as session:
+                WatchRepository(session).update_live_alert(
+                    rec.id,
+                    rendered.kind,
+                    snapshot.slots,
+                    current.alerted | snapshot.slots,
+                    rendered.render_hash,
+                )
 
 
 _ACTIONS = {

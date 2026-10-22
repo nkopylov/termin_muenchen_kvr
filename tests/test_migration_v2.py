@@ -174,14 +174,14 @@ class TestSubscriptionsToWatches:
         assert w["alert_shown_slots"] == "[]"
         assert w["alert_message_id"] is None
 
-    def test_range_starting_beyond_query_horizon_is_asap(self, v1_db):
+    def test_range_starting_beyond_query_horizon_is_kept(self, v1_db):
         add_user(v1_db, 1, "2028-01-01", "2028-02-01")
         subscribe(v1_db, 1, 100, 10)
         database.init_database()
 
         [w] = watches(v1_db)
-        assert w["when_kind"] == "asap"
-        assert w["date_from"] is None and w["date_to"] is None
+        assert w["when_kind"] == "between"
+        assert (w["date_from"], w["date_to"]) == ("2028-01-01", "2028-02-01")
 
     def test_past_range_is_asap(self, v1_db):
         add_user(v1_db, 1, "2026-01-01", "2026-03-01")

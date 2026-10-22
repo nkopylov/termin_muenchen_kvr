@@ -76,7 +76,7 @@ class TestIsValidEmail:
 class TestTimeFormatting:
     @pytest.mark.parametrize(
         ("lang", "expected"),
-        [("en", "09:05 on 2025-03-05"), ("ru", "2025-03-05 в 09:05")],
+        [("en", "Wed 05.03, 09:05"), ("ru", "Ср 05.03, 09:05")],
     )
     def test_time_on_date(self, lang, expected):
         dt = datetime(2025, 3, 5, 9, 5, tzinfo=BERLIN)
@@ -85,7 +85,7 @@ class TestTimeFormatting:
     @pytest.mark.parametrize(
         ("lang", "expected"),
         [
-            ("en", "09:05 on Wednesday, March 05, 2025"),
+            ("en", "09:05 on Wednesday, March 5, 2025"),
             ("ru", "среда, 5 марта 2025, 09:05"),
         ],
     )
@@ -139,6 +139,13 @@ class TestTimePicker:
             [("09:10", f"b1:t:{FORSTENRIEDER}:{ts(9, 10)}")],
             [(cancel, "b1:x")],
         ]
+
+    def test_times_with_office_names_one_per_row(self):
+        times = (SlotTime(ts(9), FORSTENRIEDER), SlotTime(ts(9, 5), ORLEANSPLATZ))
+
+        markup = times_markup(times, WOHNSITZ, show_office=True, lang="en")
+
+        assert [len(row) for row in markup.inline_keyboard] == [1, 1, 1]
 
     def test_at_most_twelve_times(self):
         times = tuple(SlotTime(ts(8, m), FORSTENRIEDER) for m in range(0, 60, 3))

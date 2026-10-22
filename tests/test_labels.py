@@ -105,6 +105,13 @@ class TestOfficeLabel:
     def test_without_service_no_numbers(self):
         assert office_label(10489) == "Ruppertstraße"
 
+    def test_offices_sharing_a_booking_queue_are_one_place(self, catalog):
+        for office in catalog["offices"]:
+            if office["id"] in (10489, 10313237):
+                office["sharedBookingOfficeIds"] = [10489, 10313237, 10491]
+        assert office_label(10489, 1063475, "en") == "Ruppertstraße"
+        assert office_label(10313237, 1063475, "en") == "Ruppertstraße"
+
     @pytest.mark.parametrize(
         ("lang", "text"), [(None, "Office 1"), ("ru", "Отделение 1")]
     )
@@ -117,6 +124,10 @@ class TestWhereAndWhen:
         assert where_label(rec(), "en") == "Any office"
         assert where_label(rec(), "ru") == "Любое отделение"
         assert where_label(rec(office_id=54261), "en") == "Pasing"
+
+    def test_where_names_the_only_office_of_a_service(self):
+        assert where_label(rec(service_id=1064305), "en") == "KfZ Zulassungsstelle"
+        assert where_label(rec(service_id=1064305), "ru") == "KfZ Zulassungsstelle"
 
     @pytest.mark.parametrize(
         ("spec", "en", "ru"),

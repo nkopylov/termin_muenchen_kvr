@@ -112,6 +112,37 @@ class TestRefreshCatalog:
         assert services_manager.get_services() == PAYLOAD["services"]
 
 
+class TestNoFetchOnRead:
+    """Reads run on the event loop; only refresh_catalog (in a thread) talks to the city."""
+
+    def test_unloaded_catalog_reads_empty_without_a_request(self, monkeypatch):
+        monkeypatch.setattr(services_manager, "_services_cache", None)
+        monkeypatch.setattr(services_manager, "_full_payload_cache", None)
+        requests = []
+        monkeypatch.setattr(
+            services_manager, "fetch_full_payload", lambda: requests.append(1)
+        )
+
+        assert services_manager.get_full_payload() == {
+            "offices": [],
+            "services": [],
+            "relations": [],
+        }
+        assert services_manager.get_services() == []
+        assert services_manager.get_service_info(1) is None
+        assert services_manager.catalog_loaded() is False
+        assert requests == []
+
+    def test_loaded_after_refresh(self, monkeypatch):
+        monkeypatch.setattr(services_manager, "_services_cache", None)
+        monkeypatch.setattr(services_manager, "_full_payload_cache", None)
+        monkeypatch.setattr(services_manager, "fetch_full_payload", lambda: PAYLOAD)
+
+        assert services_manager.refresh_catalog() is True
+        assert services_manager.catalog_loaded() is True
+        assert services_manager.get_services() == PAYLOAD["services"]
+
+
 class TestOfficeFallback:
     @pytest.mark.parametrize(
         ("lang", "expected"),

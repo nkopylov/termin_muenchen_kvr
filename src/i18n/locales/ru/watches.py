@@ -3,11 +3,12 @@
 
 MESSAGES: dict[str, str | dict[str, str]] = {
     "watches.header": "👀 <b>Мои поиски</b> ({count} из {limit})",
+    "watches.header_over": "👀 <b>Мои поиски</b> ({count})",
     "watches.line": "<b>{n}.</b> {summary}\n      {state}{checked}",
     "watches.checked": " · проверено {ago}",
     "watches.empty": (
         "👀 <b>Мои поиски</b>\n\n"
-        "У вас пока нет поисков. Скажите, что вам нужно, "
+        "Сейчас у вас нет поисков. Скажите, что вам нужно, "
         "и я поищу свободную запись."
     ),
     "watches.btn_time": "{n}. 🕒 Время",

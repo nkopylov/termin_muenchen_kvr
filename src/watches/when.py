@@ -12,6 +12,8 @@ BERLIN = ZoneInfo("Europe/Berlin")
 ASAP_HORIZON_DAYS = 180
 # The API rejects ranges of ~400 days; 364 keeps every query safely inside
 MAX_QUERY_DAYS = 364
+# A typed day.month this many days in the past means that date (a typo), not next year's
+RECENT_PAST_DAYS = 30
 
 WhenKind = Literal["asap", "within", "before", "between"]
 
@@ -29,6 +31,11 @@ class WhenSpec:
 class Window:
     start: date
     end: date  # inclusive
+
+    @property
+    def is_empty(self) -> bool:
+        """No day can be queried yet: the range starts beyond today + MAX_QUERY_DAYS."""
+        return self.start > self.end
 
 
 class DateError(StrEnum):
@@ -90,7 +97,8 @@ def _safe_date(year: int, month: int, day: int) -> date | None:
 
 
 def parse_user_date(text: str, today: date) -> date | None:
-    """Parse one typed date: ISO (padding optional), D.M.YYYY, D.M.YY or D.M (next occurrence)."""
+    """Parse one typed date: ISO (padding optional), D.M.YYYY, D.M.YY or D.M (the first
+    occurrence from RECENT_PAST_DAYS ago on, so a recently passed date stays in the past)."""
     token = text.strip()
     if match := _ISO_RE.fullmatch(token):
         return _safe_date(*(int(part) for part in match.groups()))
@@ -101,9 +109,10 @@ def parse_user_date(text: str, today: date) -> date | None:
     if year is not None:
         full_year = int(year) + 2000 if len(year) == 2 else int(year)
         return _safe_date(full_year, int(month), int(day))
-    for candidate_year in range(today.year, today.year + 9):
+    earliest = today - timedelta(days=RECENT_PAST_DAYS)
+    for candidate_year in range(earliest.year, today.year + 9):
         candidate = _safe_date(candidate_year, int(month), int(day))
-        if candidate is not None and candidate > today:
+        if candidate is not None and candidate >= earliest:
             return candidate
     return None
 
@@ -150,8 +159,11 @@ def migrated_when(start_raw: str | None, end_raw: str | None, today: date) -> Wh
     """WhenSpec for a user's stored global date range (migration v2)."""
     start = _parse_stored_iso(start_raw)
     end = _parse_stored_iso(end_raw)
-    if start is None or end is None or start > end or start > _max_end(today):
+    if start is None or end is None or start > end:
         return WhenSpec("asap")
+    if start > _max_end(today):
+        # Kept as typed; checked once its start is within the query horizon
+        return WhenSpec("between", date_from=start, date_to=end)
     # Signup default and the "6 months" preset both stored exactly this span
     if (end - start).days == ASAP_HORIZON_DAYS:
         return WhenSpec("asap")

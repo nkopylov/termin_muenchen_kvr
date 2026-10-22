@@ -27,6 +27,7 @@ from src.ui.commands_menu import (  # noqa: F401  (re-exported for callers of th
     set_default_commands,
 )
 from src.ui.keyboard import main_keyboard
+from src.ui.screens import show_screen
 from src.ui.telegram_safe import safe_answer, safe_delete, safe_edit_text, safe_send
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,13 @@ GATE_FREE_CALLBACKS = ("confirm_booking", "cancel_booking")
 
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /language: show the picker"""
+    """Handle /language: show the picker (as the nav screen once a language is chosen)"""
     text_input.clear_pending_input(context)
-    await send_language_picker(update, context)
+    if not is_language_chosen(get_stored_language(update.effective_user.id)):
+        await send_language_picker(update, context)
+        return
+    text, markup = build_language_picker(update.effective_user.language_code)
+    await show_screen(update, context, text, markup, parse_mode=None)
 
 
 async def language_menu_callback(

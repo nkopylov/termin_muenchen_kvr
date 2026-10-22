@@ -16,6 +16,8 @@ URGENT_WORK = 10339028
 URGENT_STUDY = 10339027
 EAT_PICKUP = 10502137
 GEWERBE = 1063423
+EINBUERGERUNG = 1071907
+PARKING = 1072043
 
 
 def ids(query: str, services=CATALOG_SERVICES, limit: int = 8) -> list[int]:
@@ -96,6 +98,54 @@ class TestSynonyms:
     def test_targets_missing_from_catalog_are_skipped(self):
         services = [s for s in CATALOG_SERVICES if s["id"] != PASSPORT]
         assert PASSPORT not in ids("паспорт", services)
+
+
+class TestNameSynonyms:
+    """Synonyms for services outside the popular list point to words of their German name"""
+
+    @pytest.mark.parametrize(
+        "query", ["citizenship", "naturalisation", "naturalization", "гражданство"]
+    )
+    def test_citizenship(self, query):
+        assert ids(query) == [EINBUERGERUNG]
+
+    @pytest.mark.parametrize("query", ["parking permit", "парковка"])
+    def test_resident_parking(self, query):
+        assert ids(query)[0] == PARKING
+
+    @pytest.mark.parametrize(
+        "query", ["регистрация машины", "car registration", "register a car"]
+    )
+    def test_vehicle_registration_before_address_or_deregistration(self, query):
+        vehicles = [
+            {"id": 1064308, "name": "Erneute Anmeldung eines Fahrzeugs"},
+            {
+                "id": 1063425,
+                "name": "Anmeldung fabrikneues Fahrzeug oder Tageszulassung",
+            },
+        ]
+        found = ids(query, CATALOG_SERVICES + vehicles)
+        assert set(found[:2]) == {1064308, 1063425}
+
+
+class TestTypos:
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("pasport", PASSPORT),
+            ("паспрот", PASSPORT),
+            ("anmeldnug", ANMELDUNG),
+            ("Einbürgerunk", EINBUERGERUNG),
+        ],
+    )
+    def test_one_typo_in_a_long_word(self, query, expected):
+        assert ids(query)[0] == expected
+
+    def test_short_words_are_not_corrected(self):
+        assert ids("cer") == []
+
+    def test_exact_matches_are_not_widened(self):
+        assert ids("reisepass") == [PASSPORT]
 
 
 class TestNameMatching:

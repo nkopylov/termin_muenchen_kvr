@@ -111,6 +111,13 @@ class TestEffectiveWindow:
         spec = WhenSpec("between", date_from=TODAY, date_to=TODAY + timedelta(days=500))
         assert effective_window(spec, TODAY).end == TODAY + timedelta(days=364)
 
+    def test_between_starting_beyond_the_horizon_is_empty_until_queryable(self):
+        start = TODAY + timedelta(days=400)
+        spec = WhenSpec("between", date_from=start, date_to=start + timedelta(days=30))
+        assert effective_window(spec, TODAY).is_empty
+        assert not effective_window(spec, start - timedelta(days=364)).is_empty
+        assert not effective_window(PRESETS["asap"], TODAY).is_empty
+
 
 class TestParseUserDate:
     @pytest.mark.parametrize(
@@ -131,9 +138,18 @@ class TestParseUserDate:
     def test_day_month_after_today_is_this_year(self):
         assert parse_user_date("15.11", TODAY) == date(2026, 11, 15)
 
-    def test_day_month_on_or_before_today_is_next_year(self):
-        assert parse_user_date("22.10", TODAY) == date(2027, 10, 22)
+    def test_day_month_of_today_is_today(self):
+        assert parse_user_date("22.10", TODAY) == TODAY
+
+    def test_day_month_passed_recently_stays_in_the_past(self):
+        assert parse_user_date("21.10", TODAY) == date(2026, 10, 21)
+        assert parse_user_date("22.9", TODAY) == date(2026, 9, 22)
+        assert parse_user_date("28.12", date(2027, 1, 5)) == date(2026, 12, 28)
+
+    def test_day_month_passed_long_ago_is_next_year(self):
+        assert parse_user_date("21.9", TODAY) == date(2027, 9, 21)
         assert parse_user_date("1.3", TODAY) == date(2027, 3, 1)
+        assert parse_user_date("5.1", date(2026, 12, 20)) == date(2027, 1, 5)
 
     def test_day_month_feb_29_picks_a_leap_year_occurrence(self):
         assert parse_user_date("29.02", date(2027, 3, 1)) == date(2028, 2, 29)
@@ -188,6 +204,13 @@ class TestParseDateRange:
 
     def test_invalid_token(self):
         assert parse_date_range("31.02.2026 - 15.03.2026", TODAY) is None
+
+    def test_range_starting_today_as_day_month(self):
+        assert parse_date_range("22.10 - 30.10", TODAY) == (TODAY, date(2026, 10, 30))
+        assert validate_between(TODAY, date(2026, 10, 30), TODAY) is None
+
+    def test_range_ending_today_as_day_month(self):
+        assert parse_date_range("15.10 - 22.10", TODAY) == (date(2026, 10, 15), TODAY)
 
 
 class TestValidate:
@@ -281,8 +304,10 @@ class TestMigratedWhen:
             "between", date_from=date(2026, 11, 1), date_to=TODAY + timedelta(days=364)
         )
 
-    def test_range_starting_beyond_query_horizon_is_asap(self):
-        assert migrated_when("2028-01-01", "2028-02-01", TODAY) == WhenSpec("asap")
+    def test_range_starting_beyond_query_horizon_is_kept_as_is(self):
+        assert migrated_when("2028-01-01", "2028-02-01", TODAY) == WhenSpec(
+            "between", date_from=date(2028, 1, 1), date_to=date(2028, 2, 1)
+        )
 
     def test_range_starting_on_last_queryable_day_is_kept(self):
         start = TODAY + timedelta(days=364)

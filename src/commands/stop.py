@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 
 from src.database import get_session
 from src.handlers import text_input
+from src.handlers.language_picker import client_language
 from src.i18n import t
 from src.i18n.user_language import get_stored_language, get_user_language
 from src.repositories import (
@@ -83,7 +84,9 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     lang = get_user_language(user_id, context)
     if get_stored_language(user_id) is None:
         await safe_send(
-            context.bot, update.effective_chat.id, t("start.not_registered", lang)
+            context.bot,
+            update.effective_chat.id,
+            t("start.not_registered", client_language(update)),
         )
         return
 

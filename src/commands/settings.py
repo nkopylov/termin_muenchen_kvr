@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 from src.commands import stop
 from src.database import get_session
 from src.handlers import text_input
+from src.handlers.language_picker import client_language
 from src.i18n import t
 from src.i18n.user_language import get_stored_language, get_user_language
 from src.repositories import UserRepository, WatchRepository
@@ -75,9 +76,10 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text_input.clear_pending_input(context)
     user_id = update.effective_user.id
     if get_stored_language(user_id) is None:
-        lang = get_user_language(user_id, context)
         await safe_send(
-            context.bot, update.effective_chat.id, t("start.not_registered", lang)
+            context.bot,
+            update.effective_chat.id,
+            t("start.not_registered", client_language(update)),
         )
         return
     await show_settings(update, context)

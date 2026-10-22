@@ -461,3 +461,66 @@ class TestRecheck:
         await self.recheck(context, 999, PRESETS["asap"])
         await context.drain()
         assert context.bot.calls == []
+
+
+class TestCityCallHoldsNoLock:
+    async def start_gated_recheck(self, db, context, fake_availability, rec):
+        fake_availability.gate = asyncio.Event()
+        fake_availability.calendar_results.append(slots_result())
+        await start_recheck(
+            callback(context), context, rec.id, PRESETS["2w"], target_message_id=MSG
+        )
+        while not fake_availability.calendar_calls:
+            await asyncio.sleep(0)
+
+    async def test_pause_during_the_check_does_not_wait_for_the_city(
+        self, db, context, fake_availability
+    ):
+        from src.commands.watches import watches_callback
+
+        register(db)
+        rec = open_watch(db, URGENT)
+        await self.start_gated_recheck(db, context, fake_availability, rec)
+
+        pause = make_callback_update(cb.watch_pause(rec.id), USER, 60, bot=context.bot)
+        await asyncio.wait_for(watches_callback(pause, context), timeout=1)
+        assert repo(db).get(rec.id).status == "paused"
+
+        fake_availability.gate.set()
+        await context.drain()
+        paused = repo(db).get(rec.id)
+        assert paused.live is None
+        assert [e.text for e in context.bot.edits if e.message_id == MSG][-1] == t(
+            "alert.final_paused", "en", summary=html.escape(watch_summary(paused, "en"))
+        )
+
+    async def test_checker_leaves_the_watch_to_the_running_check(
+        self, db, context, fake_availability, clock
+    ):
+        from src.services.alert_lifecycle import apply_alert
+        from src.watches.alert_decision import AlertAction
+        from src.watches.slots import WatchSnapshot
+
+        register(db)
+        rec = open_watch(db, URGENT)
+        await self.start_gated_recheck(db, context, fake_availability, rec)
+
+        checker_snapshot = WatchSnapshot(
+            clock.now,
+            True,
+            frozenset({Slot(DAY, URGENT_OFFICE)}),
+            (SlotTime(TS, URGENT_OFFICE),),
+        )
+        repo(db).record_check(rec.id, checker_snapshot)
+        action = await asyncio.wait_for(
+            apply_alert(
+                context.bot, rec.id, checker_snapshot, clock.now, lambda _: False
+            ),
+            timeout=1,
+        )
+        assert action is AlertAction.NOOP
+        assert context.bot.sent == []
+
+        fake_availability.gate.set()
+        await context.drain()
+        assert repo(db).get(rec.id).live.message_id == MSG

@@ -29,9 +29,8 @@ EMAIL = "ivan@example.com"
 LANGS = ["en", "ru"]
 
 CANCEL = {"en": "❌ Cancel", "ru": "❌ Отмена"}
-CANCEL_BOOKING = {"en": "❌ Cancel Booking", "ru": "❌ Отменить запись"}
-CONFIRM = {"en": "✅ Confirm Booking", "ru": "✅ Подтвердить запись"}
-MY_WATCHES = {"en": "👀 My watches", "ru": "👀 Мои поиски"}
+CANCEL_BOOKING = {"en": "❌ Cancel", "ru": "❌ Отмена"}
+CONFIRM = {"en": "✅ Confirm booking", "ru": "✅ Подтвердить запись"}
 LONG_TIME = {
     "en": "09:30 on Thursday, October 29, 2026",
     "ru": "четверг, 29 октября 2026, 09:30",
@@ -255,14 +254,14 @@ class TestTimeSelected:
             (
                 "en",
                 (
-                    "✅ Selected time: 09:30 on 2026-10-29\n\n"
+                    "✅ Selected time: Thu 29.10, 09:30\n\n"
                     "Please enter your full name (as it appears on your documents):"
                 ),
             ),
             (
                 "ru",
                 (
-                    "✅ Выбранное время: 2026-10-29 в 09:30\n\n"
+                    "✅ Выбранное время: Чт 29.10, 09:30\n\n"
                     "Введите имя и фамилию (как в документах):"
                 ),
             ),
@@ -455,7 +454,7 @@ class TestEmailReceived:
     @pytest.mark.parametrize(
         ("lang", "expected"),
         [
-            ("en", "🕐 Time: 09:05 on Thursday, November 05, 2026\n"),
+            ("en", "🕐 Time: 09:05 on Thursday, November 5, 2026\n"),
             ("ru", "🕐 Время: четверг, 5 ноября 2026, 09:05\n"),
         ],
     )
@@ -484,7 +483,7 @@ def city(monkeypatch):
 
 SUCCESS = {
     "en": (
-        "🎉 <b>Booking Successful!</b> 🎉\n\n"
+        "🎉 <b>Booking successful!</b> 🎉\n\n"
         "📋 Booking ID: P-42\n"
         "🕐 Time: 09:30 on Thursday, October 29, 2026\n"
         "👤 Name: Ivan Petrov\n"
@@ -519,19 +518,17 @@ FINISHED = {
 }
 FAILED = {
     "en": (
-        "❌ <b>Booking Failed</b>\n\n"
+        "❌ <b>Booking failed</b>\n\n"
         "The appointment could not be booked. Possible reasons:\n"
         "• The slot was just taken by someone else\n"
-        "• Network error occurred\n"
-        "• Captcha token expired\n\n"
+        "• The city website did not respond\n\n"
         "Please try booking another available slot."
     ),
     "ru": (
         "❌ <b>Запись не удалась</b>\n\n"
         "Не удалось оформить запись. Возможные причины:\n"
         "• это время только что занял кто-то другой\n"
-        "• произошла ошибка сети\n"
-        "• истёк срок действия капчи\n\n"
+        "• сайт города не ответил\n\n"
         "Пожалуйста, попробуйте выбрать другое свободное время."
     ),
 }
@@ -541,12 +538,12 @@ WILL_UPDATE = {
 }
 ERROR = {
     "en": (
-        "❌ An error occurred while booking:\nboom &lt;1&gt;\n\n"
-        "Please try again or contact support."
+        "❌ Something went wrong while booking.\n\n"
+        "Please try again or choose another free slot."
     ),
     "ru": (
-        "❌ При оформлении записи произошла ошибка:\nboom &lt;1&gt;\n\n"
-        "Пожалуйста, попробуйте снова или обратитесь в поддержку."
+        "❌ При оформлении записи что-то пошло не так.\n\n"
+        "Пожалуйста, попробуйте снова или выберите другое свободное время."
     ),
 }
 
@@ -597,7 +594,7 @@ class TestConfirmBooking:
         await context.drain()
 
         assert bot.edits[-1].text == FAILED[lang] + "\n\n" + WILL_UPDATE[lang]
-        assert buttons(bot.edits[-1].reply_markup) == [(MY_WATCHES[lang], "w1:list")]
+        assert bot.edits[-1].reply_markup is None
 
     @pytest.mark.parametrize("lang", LANGS)
     async def test_error(self, db, context, bot, city, caplog, lang):
@@ -634,15 +631,15 @@ class TestCancelAndCleared:
                 "en",
                 (
                     "❌ Your booking session expired or was cleared.\n\n"
-                    "Please start a new booking from an appointment notification."
+                    "Please start a new booking from a Free slots message."
                 ),
             ),
             (
                 "ru",
                 (
                     "❌ Время на оформление записи истекло, или процесс был сброшен.\n\n"
-                    "Пожалуйста, начните запись заново из уведомления о свободной "
-                    "записи."
+                    "Пожалуйста, начните запись заново из сообщения "
+                    "«Есть свободные записи»."
                 ),
             ),
         ],

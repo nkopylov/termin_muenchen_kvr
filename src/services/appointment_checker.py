@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_FAILURES = 5
 CATALOG_REFRESH_INTERVAL = timedelta(hours=6)
+CATALOG_RETRY_INTERVAL = timedelta(minutes=1)
 
 # Global stats tracking
 stats = {
@@ -121,11 +122,14 @@ class CycleResult:
 
 
 async def _refresh_catalog_if_due(now: datetime) -> None:
+    """Every 6 h; every minute while the catalog could not be loaded at all."""
     global _catalog_refreshed_at
-    if _catalog_refreshed_at is None:
+    loaded = services_manager.catalog_loaded()
+    if _catalog_refreshed_at is None and loaded:
         _catalog_refreshed_at = now
         return
-    if now - _catalog_refreshed_at < CATALOG_REFRESH_INTERVAL:
+    interval = CATALOG_REFRESH_INTERVAL if loaded else CATALOG_RETRY_INTERVAL
+    if _catalog_refreshed_at is not None and now - _catalog_refreshed_at < interval:
         return
     _catalog_refreshed_at = now
     await asyncio.to_thread(services_manager.refresh_catalog)
@@ -166,7 +170,8 @@ async def _end_finished(
         elif catalog_loaded and office_gone(rec):
             reason = "gone"
         if reason is None:
-            remaining.append((rec, window))
+            if not window.is_empty:
+                remaining.append((rec, window))
         elif not is_user_in_queue(rec.user_id):
             result.ended += await end_watch_by_checker(
                 bot, rec.id, reason, now, is_user_in_queue

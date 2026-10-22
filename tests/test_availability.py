@@ -108,6 +108,42 @@ class TestOffices:
         assert availability.watch_office_ids(watch()) == sorted(OFFICES)
         assert availability.watch_office_ids(watch(10489)) == [10489]
 
+    def test_office_disabled_for_the_service_is_not_public(self, catalog):
+        from src import services_manager
+
+        payload = services_manager._full_payload_cache
+        office = next(o for o in payload["offices"] if o["id"] == 10489)
+        office["disabledByServices"] = [SID, 1063441]
+        assert availability.public_office_ids(SID) == set(OFFICES) - {10489}
+        office["disabledByServices"] = [1063441]
+        assert availability.public_office_ids(SID) == set(OFFICES)
+
+    def test_shared_booking_group_is_one_choice(self, catalog):
+        from src import services_manager
+
+        shared = [10489, 10313237, 10491]
+        for office in services_manager._full_payload_cache["offices"]:
+            if office["id"] in (10489, 10313237):
+                office["sharedBookingOfficeIds"] = shared
+        assert availability.office_choices(SID) == [10489, 102522, 102523]
+        assert availability.public_office_ids(SID) == set(OFFICES)
+
+    def test_single_office_watch_queries_its_shared_booking_group(self, catalog):
+        from src import services_manager
+
+        shared = [10489, 10313237, 10491]
+        for office in services_manager._full_payload_cache["offices"]:
+            if office["id"] in (10489, 10313237):
+                office["sharedBookingOfficeIds"] = shared
+        # 10491 shares the queue but does not offer the service
+        assert availability.watch_office_ids(watch(10313237)) == [10489, 10313237]
+        assert availability.watch_office_ids(watch(10489)) == [10489, 10313237]
+        assert availability.watch_office_ids(watch(102522)) == [102522]
+
+    def test_choices_without_shared_groups_are_the_public_offices(self, catalog):
+        assert availability.office_choices(SID) == sorted(OFFICES)
+        assert availability.office_choices(12345) == []
+
 
 @pytest.mark.asyncio
 class TestFetchCalendar:
@@ -256,6 +292,23 @@ class TestDayTimes:
         api.replies.append(ApiResponse(None, 500, ()))
         assert await availability.fetch_day_times(SID, [1], date(2026, 10, 29)) is None
 
+    async def test_rejected_office_falls_back_per_office(self, api, tokens):
+        def per_office(params):
+            office = int(params["officeIds"])
+            if office == 3:
+                return err("invalidLocationAndServiceCombination")
+            return ok(
+                calendar(
+                    days={"2026-10-29": [office]},
+                    times={"2026-10-29": [(100 + office, office)]},
+                )
+            )
+
+        api.replies += [err("invalidLocationAndServiceCombination")] + [per_office] * 3
+        times = await availability.fetch_day_times(SID, [1, 2, 3], date(2026, 10, 29))
+        assert times == (SlotTime(101, 1), SlotTime(102, 2))
+        assert all(call["slotsStartDate"] == "2026-10-29" for call in api.calls)
+
 
 @pytest.mark.asyncio
 class TestSnapshotForWatch:
@@ -334,6 +387,12 @@ class TestSnapshotForWatch:
         api.replies.append(ok({"availableDays": []}))
         snap = await availability.snapshot_for_watch(watch(), TODAY)
         assert snap.ok and snap.slots == frozenset() and snap.earliest_times == ()
+
+    async def test_range_beyond_the_horizon_needs_no_call(self, api, tokens, catalog):
+        spec = WhenSpec("between", date_from=date(2028, 1, 1), date_to=date(2028, 2, 1))
+        snap = await availability.snapshot_for_watch(watch(when=spec), TODAY)
+        assert snap.ok and snap.slots == frozenset()
+        assert api.calls == []
 
     async def test_failed_query_is_not_ok(self, api, tokens, catalog):
         api.replies.append(ApiResponse(None, 500, ()))

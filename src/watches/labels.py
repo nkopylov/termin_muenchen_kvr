@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from src import services_manager
 from src.i18n import t
-from src.watches.availability import public_office_ids
+from src.watches.availability import booking_group, office_choices
 from src.watches.when import WhenSpec
 
 POPULAR_SERVICE_IDS: tuple[int, ...] = (
@@ -57,20 +57,32 @@ def office_label(
     if service_id is None:
         return label
 
+    shown = min(booking_group(service_id, office_id))
     twins = sorted(
         oid
-        for oid in public_office_ids(service_id) | {office_id}
+        for oid in {*office_choices(service_id), shown}
         if oid in names and _short_office_name(names[oid]) == label
     )
     if len(twins) > 1:
-        label = f"{label}{SEPARATOR}{twins.index(office_id) + 1}"
+        label = f"{label}{SEPARATOR}{twins.index(shown) + 1}"
     return label
 
 
-def where_label(rec, lang: str | None) -> str:
-    if rec.office_id is None:
+def only_office(service_id: int) -> int | None:
+    """The office a service is offered at when it has exactly one."""
+    choices = office_choices(service_id)
+    return choices[0] if len(choices) == 1 else None
+
+
+def where_text(service_id: int, office_id: int | None, lang: str | None) -> str:
+    office_id = office_id if office_id is not None else only_office(service_id)
+    if office_id is None:
         return t("watch.where_any", lang)
-    return office_label(rec.office_id, rec.service_id, lang)
+    return office_label(office_id, service_id, lang)
+
+
+def where_label(rec, lang: str | None) -> str:
+    return where_text(rec.service_id, rec.office_id, lang)
 
 
 def date_label(d: date) -> str:

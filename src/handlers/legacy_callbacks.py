@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 
 from src.commands import find, watches
 from src.handlers import text_input
+from src.handlers.language_picker import client_language
 from src.i18n import t
 from src.i18n.user_language import get_stored_language, get_user_language
 from src.services_manager import CATEGORY_KEYWORDS
@@ -46,7 +47,7 @@ async def _show_my_watches(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 context.bot,
                 update.effective_chat.id,
                 message.message_id,
-                t("start.not_registered", lang),
+                t("start.not_registered", client_language(update)),
             )
         return
     text, markup = watches.build_watches_screen(user_id, lang, when.utcnow())

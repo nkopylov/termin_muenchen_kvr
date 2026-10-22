@@ -262,8 +262,8 @@ class TestTimeSelected:
         assert state == ("stop", booking.ASKING_NAME)
         [edit] = bot.edits
         assert edit.message_id == MSG
-        assert edit.text == t("booking.ask_name", "en", time="09:30 on 2026-10-29")
-        assert buttons(edit.reply_markup) == [("❌ Cancel Booking", "b1:x")]
+        assert edit.text == t("booking.ask_name", "en", time="Thu 29.10, 09:30")
+        assert buttons(edit.reply_markup) == [("❌ Cancel", "b1:x")]
         row = session_row(db)
         assert (row["state"], row["office_id"], row["timestamp"]) == (
             "ASKING_NAME",
@@ -303,7 +303,7 @@ class TestTimeSelected:
 
         assert state == ("stop", booking.ASKING_NAME)
         assert bot.edits[-1].text == t(
-            "booking.ask_name", "en", time="09:30 on 2026-10-29"
+            "booking.ask_name", "en", time="Thu 29.10, 09:30"
         )
         assert session_row(db)["state"] == "ASKING_NAME"
 
@@ -337,7 +337,7 @@ class TestTimeSelected:
 
         assert state == ("stop", booking.ASKING_NAME)
         assert bot.edits[-1].text == t(
-            "booking.ask_name", "en", time="09:30 on 2026-10-29"
+            "booking.ask_name", "en", time="Thu 29.10, 09:30"
         )
 
 
@@ -366,7 +366,7 @@ class TestContactSteps:
         assert sent.text == t(
             "booking.ask_email", "en", name="&lt;i&gt;Ivan&lt;/i&gt; Petrov"
         )
-        assert buttons(sent.reply_markup) == [("❌ Cancel Booking", "b1:x")]
+        assert buttons(sent.reply_markup) == [("❌ Cancel", "b1:x")]
         [strip] = bot.calls_of("edit_message_reply_markup")
         assert (strip.message_id, strip.reply_markup) == (MSG, None)
         row = session_row(db)
@@ -400,7 +400,7 @@ class TestContactSteps:
         )
         assert sent.parse_mode == "HTML"
         assert buttons(sent.reply_markup) == [
-            ("✅ Confirm Booking", "b1:ok"),
+            ("✅ Confirm booking", "b1:ok"),
             ("❌ Cancel", "b1:x"),
         ]
         stripped = bot.calls_of("edit_message_reply_markup")
@@ -476,14 +476,20 @@ class TestStepsWithoutSession:
         assert state == ConversationHandler.END
         assert bot.calls == []
 
-    async def test_leaving_strips_the_booking_message(self, db, user, context, bot):
+    async def test_leaving_replaces_the_question_with_cancelled(
+        self, db, user, context, bot
+    ):
         open_session(db, "ASKING_NAME", timestamp=SLOT_TS)
 
         state = await type_text(booking.leave_booking, context, "/watches")
 
         assert state == ConversationHandler.END
-        stripped = bot.calls_of("edit_message_reply_markup")
-        assert [(c.message_id, c.reply_markup) for c in stripped] == [(MSG, None)]
+        [ended] = bot.edits
+        assert (ended.message_id, ended.text, ended.reply_markup) == (
+            MSG,
+            t("booking.cancelled", "en"),
+            None,
+        )
         assert session_row(db) is None
         assert context.user_data == {"lang": "en", "await_date": {"kind": "before"}}
 
@@ -597,8 +603,8 @@ class TestRegisteredConversation:
 
         assert seen(app) == [(update_kind, value)]
         assert session_row(db) is None
-        stripped = app.bot.calls_of("edit_message_reply_markup")
-        assert [(c.message_id, c.reply_markup) for c in stripped] == [(MSG, None)]
+        ended = [e for e in app.bot.edits if e.message_id == MSG][-1]
+        assert (ended.text, ended.reply_markup) == (t("booking.cancelled", "en"), None)
 
         await send(app, text(app, "passport"))
         assert seen(app)[-1] == ("text", "passport")
@@ -646,7 +652,7 @@ class TestRegisteredConversation:
 
         assert session_row(db)["state"] == "ASKING_NAME"
         assert app.bot.edits[-1].text == t(
-            "booking.ask_name", "en", time="09:30 on 2026-10-29"
+            "booking.ask_name", "en", time="Thu 29.10, 09:30"
         )
         await send(app, text(app, NAME))
         assert seen(app) == []

@@ -19,7 +19,12 @@ from src.watches.alert_decision import (
     decide_alert,
     interaction_state,
 )
-from src.watches.alert_ops import alert_lock, close_live_alert, queue_retire
+from src.watches.alert_ops import (
+    alert_lock,
+    close_live_alert,
+    immediate_check_running,
+    queue_retire,
+)
 from src.watches.alert_view import (
     BERLIN,
     FinalState,
@@ -167,7 +172,7 @@ async def apply_alert(
         if rec is None or rec.status != "active":
             return AlertAction.NOOP
         # Changed or re-checked by the user while this check was running
-        if rec.snapshot != snapshot:
+        if rec.snapshot != snapshot or immediate_check_running(watch_id):
             return AlertAction.NOOP
 
         interaction = interaction_state(

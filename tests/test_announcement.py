@@ -55,7 +55,7 @@ async def test_levels_commands_and_messages(db, users):
     assert await announce_new_ui(bot) == 2
 
     by_chat = {c.chat_id: c for c in bot.sent}
-    assert set(by_chat) == {WITH_WATCH_EN, WITH_WATCH_RU}
+    assert set(by_chat) == {WITH_WATCH_EN, WITH_WATCH_RU, NO_LANGUAGE}
     for chat_id, lang in ((WITH_WATCH_EN, "en"), (WITH_WATCH_RU, "ru")):
         sent = by_chat[chat_id]
         assert sent.text == t(
@@ -74,9 +74,30 @@ async def test_levels_commands_and_messages(db, users):
     assert ui_version(db, WITH_WATCH_EN) == 2
     assert ui_version(db, WITH_WATCH_RU) == 2
     assert ui_version(db, WITHOUT_WATCH_RU) == 1
-    assert ui_version(db, NO_LANGUAGE) == 0
+    assert ui_version(db, NO_LANGUAGE) == 1
     assert ui_version(db, ALREADY_CURRENT) == 2
     assert ui_version(db, LEVEL_ONE_WITH_WATCH) == 1
+
+
+async def test_watcher_without_language_is_asked_for_one(db):
+    # Migration v1 resets every language, so users upgrading from before it land here
+    add_user(db, NO_LANGUAGE, "", watches=1)
+    add_user(db, 7, "")
+    bot = FakeBot()
+
+    await announce_new_ui(bot)
+
+    [picker] = bot.sent
+    assert picker.chat_id == NO_LANGUAGE
+    assert picker.text == t("language.picker_prompt", "en")
+    assert [
+        b.callback_data for row in picker.reply_markup.inline_keyboard for b in row
+    ] == [
+        "lang:en",
+        "lang:ru",
+    ]
+    assert ui_version(db, NO_LANGUAGE) == 1
+    assert ui_version(db, 7) == 0
 
 
 async def test_idempotent(db, users):

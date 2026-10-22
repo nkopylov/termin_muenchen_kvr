@@ -3,11 +3,11 @@
 
 MESSAGES: dict[str, str | dict[str, str]] = {
     "alert.slots": "🎉 <b>Есть свободные записи</b>\n{summary}\n\n📅 {day}: {times}{more}",
-    "alert.also_free": "Ещё свободно: {days}",
+    "alert.also_free": "Также свободно: {days}",
     "alert.also_free_more": {
-        "one": "Ещё свободно: {days} и ещё {count} день",
-        "few": "Ещё свободно: {days} и ещё {count} дня",
-        "many": "Ещё свободно: {days} и ещё {count} дней",
+        "one": "Также свободно: {days} и ещё {count} день",
+        "few": "Также свободно: {days} и ещё {count} дня",
+        "many": "Также свободно: {days} и ещё {count} дней",
     },
     "alert.times_unknown": "время смотрите на сайте",
     "alert.updated_existing": "✏️ Я обновил ваш поиск по этой услуге.",
@@ -24,11 +24,11 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "🔎 <b>Ищу запись</b>\n{summary}\n\n"
         "😕 Сейчас свободных записей нет (на {time}). Продолжаю искать."
     ),
-    "alert.outdated": "⌛ Устарело — смотрите новое сообщение ниже.",
+    "alert.outdated": "⌛ Устарело — этот поиск продолжается в более новом сообщении.",
     "alert.final_booked": "✅ <b>Вы записаны</b>\n{summary}\n\nЭтот поиск завершён.",
     "alert.final_stopped": "⏹ <b>Поиск остановлен</b>\n{summary}",
     "alert.final_paused": (
-        "⏸ <b>Поиск на паузе</b>\n{summary}\n\nВозобновить его можно в «Мои поиски»."
+        "⏸ <b>Поиск на паузе</b>\n{summary}\n\nВозобновить его можно в разделе «Мои поиски»."
     ),
     "alert.final_deadline": "⌛ <b>Поиск завершён</b>: срок прошёл.\n{summary}",
     "alert.final_gone": (
@@ -37,7 +37,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     ),
     "alert.deadline": (
         "⌛ <b>Поиск завершён</b>\n{summary}\n\n"
-        "Срок прошёл, а свободную запись я так и не нашёл."
+        "Срок прошёл. Продлите поиск или начните новый."
     ),
     "alert.gone": (
         "⚠️ <b>Поиск завершён</b>\n{summary}\n\n"

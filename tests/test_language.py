@@ -403,8 +403,11 @@ class TestLanguageChoice:
             FakeContext(bot),
         )
 
-        welcome, follow_up = bot.sent
-        assert welcome.text == t("start.welcome", "en")
+        announce, follow_up = bot.sent
+        assert announce.text == t(
+            "start.announce", "en", watches=t("keyboard.watches", "en")
+        )
+        assert isinstance(announce.reply_markup, ReplyKeyboardMarkup)
         assert follow_up.text == build_watches_screen(USER_ID, "en", clock.now)[0]
 
     async def test_choice_sets_chat_commands_in_that_language(
@@ -502,6 +505,23 @@ class TestLanguageCommand:
         assert sent.text == t("language.picker_prompt", "en")
         assert buttons(sent.reply_markup)[0] == ("🇷🇺 Русский", "lang:ru")
         assert pending_input == [context]
+
+    async def test_command_picker_becomes_the_nav_screen(self, db, pending_input):
+        add_user(db, "en")
+        with Session(db) as session:
+            UserRepository(session).set_nav_message_id(USER_ID, 33)
+        bot = RecordingBot()
+        context = FakeContext(bot)
+
+        await language_command(
+            make_text_update("/language", user_id=USER_ID, bot=bot), context
+        )
+
+        [sent] = bot.sent
+        assert sent.text == t("language.picker_prompt", "en")
+        [stripped] = bot.calls_of("edit_message_reply_markup")
+        assert stripped.message_id == 33
+        assert nav_pointer(db) == 1000  # FakeBot numbers sent messages from 1000
 
     async def test_settings_button_shows_picker_in_place(self, db):
         add_user(db, "ru")

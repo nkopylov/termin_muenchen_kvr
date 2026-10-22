@@ -40,22 +40,52 @@ class CallResult:
 
 
 def public_office_ids(service_id: int) -> set[int]:
-    """Offices with a public relation to the service that exist in the catalog."""
+    """Offices with a public relation to the service that exist in the catalog, without
+    those that disable the service (the city website hides them and they get no slots)."""
     payload = services_manager.get_full_payload()
-    known = {office["id"] for office in payload.get("offices", [])}
+    bookable = {
+        office["id"]
+        for office in payload.get("offices", [])
+        if service_id not in (office.get("disabledByServices") or ())
+    }
     return {
         r["officeId"]
         for r in payload.get("relations", [])
         if r["serviceId"] == service_id
         and r.get("public", True)
-        and r["officeId"] in known
+        and r["officeId"] in bookable
     }
 
 
+def _shared_booking_ids(service_id: int) -> dict[int, frozenset[int]]:
+    """Each public office of the service mapped to the public offices that share its
+    booking queue (sharedBookingOfficeIds), itself included."""
+    public = public_office_ids(service_id)
+    groups: dict[int, frozenset[int]] = {}
+    for office in services_manager.get_full_payload().get("offices", []):
+        if office["id"] not in public:
+            continue
+        shared = set(office.get("sharedBookingOfficeIds") or ()) & public
+        groups[office["id"]] = frozenset(shared | {office["id"]})
+    return groups
+
+
+def office_choices(service_id: int) -> list[int]:
+    """The service's public offices as the city website offers them: offices sharing a
+    booking queue are one choice, named by their lowest id."""
+    return sorted({min(group) for group in _shared_booking_ids(service_id).values()})
+
+
+def booking_group(service_id: int, office_id: int) -> list[int]:
+    """office_id and the public offices of the service that share its booking queue."""
+    group = _shared_booking_ids(service_id).get(office_id, frozenset())
+    return sorted(group | {office_id})
+
+
 def watch_office_ids(rec) -> list[int]:
-    """The watch's office, or every public office of its service."""
+    """The watch's office with the offices sharing its queue, or every public office."""
     if rec.office_id is not None:
-        return [rec.office_id]
+        return booking_group(rec.service_id, rec.office_id)
     return sorted(public_office_ids(rec.service_id))
 
 
@@ -121,17 +151,21 @@ def _merge_calendars(calendars: list[dict]) -> dict:
 
 
 async def fetch_calendar_with_fallback(
-    service_id: int, office_ids: list[int], start: date, end: date
+    service_id: int,
+    office_ids: list[int],
+    start: date,
+    end: date,
+    slots_day: date | None = None,
 ) -> tuple[CallResult, set[int]]:
     """fetch_calendar; on a combination error query each office alone and merge the results.
     Returns the result and the offices dropped for failing with a combination error."""
-    result = await fetch_calendar(service_id, office_ids, start, end)
+    result = await fetch_calendar(service_id, office_ids, start, end, slots_day)
     if result.error is not ApiError.COMBINATION:
         return result, set()
 
     calendars, dropped = [], set()
     for office_id in office_ids:
-        single = await fetch_calendar(service_id, [office_id], start, end)
+        single = await fetch_calendar(service_id, [office_id], start, end, slots_day)
         if single.ok:
             calendars.append(single.data)
         elif single.error is ApiError.COMBINATION:
@@ -151,7 +185,9 @@ async def fetch_day_times(
     service_id: int, office_ids: list[int], day: date
 ) -> tuple[SlotTime, ...] | None:
     """All appointment times of `day` at `office_ids`; () when the day is gone, None on failure."""
-    result = await fetch_calendar(service_id, office_ids, day, day, slots_day=day)
+    result, _ = await fetch_calendar_with_fallback(
+        service_id, office_ids, day, day, slots_day=day
+    )
     if not result.ok:
         return None
     entry = next(
@@ -179,7 +215,7 @@ async def snapshot_for_watch(rec, today: date) -> WatchSnapshot:
     """Check one watch now (used for the immediate check after creating or changing it)."""
     window = effective_window(rec.when, today)
     offices = watch_office_ids(rec)
-    if window is None or not offices:
+    if window is None or window.is_empty or not offices:
         return WatchSnapshot(when.utcnow(), True)
 
     result, dropped = await fetch_calendar_with_fallback(

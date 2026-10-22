@@ -16,7 +16,13 @@ from src.config import get_config
 from src.i18n import t
 from src.ui import callbacks as cb
 from src.watches.availability import public_office_ids
-from src.watches.labels import day_label, office_label, short_date_label, watch_summary
+from src.watches.labels import (
+    day_label,
+    office_label,
+    only_office,
+    short_date_label,
+    watch_summary,
+)
 from src.watches.slots import SlotTime, WatchSnapshot, top_days
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -64,13 +70,14 @@ def _times_text(rec, times: tuple[SlotTime, ...], lang: str) -> str:
     shown = times[:MAX_TIMES]
     if not shown:
         return t("alert.times_unknown", lang)
-    if rec.office_id is not None:
+    if rec.office_id is not None or only_office(rec.service_id) is not None:
         return ", ".join(_clock_time(s.ts) for s in shown)
     parts = []
-    for office_id, run in groupby(shown, key=lambda s: s.office_id):
+    for office, run in groupby(
+        shown, key=lambda s: office_label(s.office_id, rec.service_id, lang)
+    ):
         clocks = [_clock_time(s.ts) for s in run]
-        office = html.escape(office_label(office_id, rec.service_id, lang))
-        clocks[-1] = f"{clocks[-1]} ({office})"
+        clocks[-1] = f"{clocks[-1]} ({html.escape(office)})"
         parts.extend(clocks)
     return ", ".join(parts)
 

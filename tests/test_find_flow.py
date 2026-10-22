@@ -110,14 +110,14 @@ def slots_result():
 
 class TestFindScreen:
     @pytest.mark.parametrize("lang", ["en", "ru"])
-    async def test_popular_services_in_order_two_per_row(self, lang):
+    async def test_popular_services_in_order_one_per_row(self, lang):
         text, markup = build_find_screen(lang)
         assert text == t("find.title", lang)
         popular = [b for row in markup.inline_keyboard[:-1] for b in row]
         assert [b.callback_data for b in popular] == [
             cb.find_service(sid) for sid in POPULAR_SERVICE_IDS
         ]
-        assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
+        assert all(len(row) == 1 for row in markup.inline_keyboard[:-1])
         for button, sid in zip(popular, POPULAR_SERVICE_IDS):
             assert button.text.endswith(" " + t(f"watch.svc_{sid}", lang))
             assert not button.text.startswith(t(f"watch.svc_{sid}", lang))
@@ -147,7 +147,12 @@ class TestFindScreen:
 
     async def test_find_command_unregistered(self, db, context):
         await find_command(make_text_update("/find", USER, bot=context.bot), context)
-        assert context.bot.sent[-1].text == t("find.not_registered", "en")
+        assert context.bot.sent[-1].text == t("start.not_registered", "en")
+
+    async def test_unregistered_gets_the_telegram_client_language(self, db, context):
+        update = make_text_update("/find", USER, bot=context.bot, language_code="ru")
+        await find_command(update, context)
+        assert context.bot.sent[-1].text == t("start.not_registered", "ru")
 
     async def test_home_button_edits_pressed_message(self, db, context):
         register(db, "ru")
@@ -164,7 +169,7 @@ class TestFindScreen:
 
     async def test_unregistered_button(self, db, context):
         await press(context, cb.find_home())
-        assert last_screen(context.bot)[0] == t("find.not_registered", "en")
+        assert last_screen(context.bot)[0] == t("start.not_registered", "en")
 
 
 class TestBrowse:
@@ -238,7 +243,7 @@ class TestBrowse:
         register(db)
         await press(context, cb.find_category("ausweis", 0))
         text = last_screen(context.bot)[0]
-        assert "Ausweis &amp; Pass" in text
+        assert "ID card &amp; passport" in text
 
     async def test_show_category_page_from_another_handler(self, db, context):
         register(db)
@@ -256,7 +261,7 @@ class TestServiceStep:
             "find.when",
             "en",
             service=html.escape(service_label(URGENT, "en")),
-            where=t("watch.where_any", "en"),
+            where="Servicestelle für Zuwanderung und Einbürgerung",
         )
         assert data_rows(markup) == [
             [cb.find_when(URGENT, None, "asap"), cb.find_when(URGENT, None, "2w")],
@@ -287,6 +292,18 @@ class TestServiceStep:
         ) in offices
         assert layout[-1] == [(t("find.btn_back", "en"), cb.find_home())]
 
+    async def test_offices_sharing_a_booking_queue_are_one_button(
+        self, db, context, catalog
+    ):
+        for office in catalog["offices"]:
+            if office["id"] in (10489, 10313237):
+                office["sharedBookingOfficeIds"] = [10489, 10313237, 10491]
+        register(db)
+        await press(context, cb.find_service(ANMELDUNG))
+        offices = [b for row in rows(last_screen(context.bot)[1])[1:-1] for b in row]
+        assert ("Ruppertstraße", cb.find_office(ANMELDUNG, 10489)) in offices
+        assert len(offices) == len(BUERGERBUERO) - 1
+
     async def test_at_most_ten_offices(self, db, context, catalog):
         extra = [{"id": 70000 + i, "name": f"Bürgerbüro Extra {i}"} for i in range(5)]
         catalog["offices"] += extra
@@ -308,6 +325,24 @@ class TestServiceStep:
         text, markup = last_screen(context.bot)
         assert text == t("find.limit", "en", count=MAX_OPEN_WATCHES)
         assert rows(markup) == [[(t("keyboard.watches", "en"), cb.watches_list())]]
+
+    async def test_limit_above_the_maximum_says_how_many_to_stop(self, db, context):
+        from src.db_models import Watch
+
+        register(db)
+        services = (*OTHER_SERVICES, 1063423, 1071907)
+        with Session(db) as session:
+            session.add_all(
+                Watch(user_id=USER, service_id=sid, when_kind="asap")
+                for sid in services
+            )
+            session.commit()
+        await press(context, cb.find_service(ANMELDUNG))
+        text, _ = last_screen(context.bot)
+        assert text == t(
+            "find.limit_over", "en", open=8, limit=MAX_OPEN_WATCHES, count=4
+        )
+        assert "Stop 4 of them" in text
 
     async def test_no_limit_screen_for_a_watched_service(self, db, context):
         register(db)
@@ -491,22 +526,38 @@ class TestEditWatch:
         old = [e for e in context.bot.edits if e.message_id == 30]
         assert [e.text for e in old] == [t("alert.outdated", "en")]
 
+    async def test_time_of_a_stopped_watch_says_search_again(self, db, context):
+        register(db)
+        rec = open_watch(db, ANMELDUNG, FORSTENRIED)
+        watches(db).set_status(rec.id, "ended", end_reason="stopped")
+        await press(context, cb.find_edit(rec.id))
+        assert last_screen(context.bot)[0] == t(
+            "find.when_again", "en", summary=html.escape(watch_summary(rec, "en"))
+        )
+
     async def test_any_office_on_gone_watch(self, db, context, fake_availability):
         register(db)
         rec = open_watch(db, ANMELDUNG, FORSTENRIED)
         watches(db).set_status(rec.id, "ended", end_reason="gone")
         await press(context, cb.find_any(rec.id))
-        assert get_watch(db, rec.id).office_id is None
-        assert data_rows(last_screen(context.bot)[1])[0][0] == cb.find_edit_when(
-            rec.id, "asap"
+        # Nothing changes before a time is chosen, so Back leaves the ended watch as it was
+        gone = get_watch(db, rec.id)
+        assert (gone.status, gone.office_id) == ("ended", FORSTENRIED)
+        text, markup = last_screen(context.bot)
+        assert text == t(
+            "find.when",
+            "en",
+            service=html.escape(service_label(ANMELDUNG, "en")),
+            where=t("watch.where_any", "en"),
         )
+        assert data_rows(markup)[0][0] == cb.find_when(ANMELDUNG, None, "asap")
 
         fake_availability.calendar_results.append(CallResult(True, calendar(), None))
-        await press(context, cb.find_edit_when(rec.id, "asap"))
+        await press(context, cb.find_when(ANMELDUNG, None, "asap"))
         await context.drain()
-        reopened = get_watch(db, rec.id)
-        assert reopened.status == "active"
-        assert reopened.office_id is None
+        watching = watches(db).find_open(USER, ANMELDUNG)
+        assert watching.office_id is None and watching.status == "active"
+        assert get_watch(db, rec.id).end_reason == "gone"
 
     async def test_any_office_at_limit(self, db, context):
         register(db)
@@ -566,7 +617,7 @@ class TestEditWatch:
         assert switched.office_id is None
         text, markup = last_screen(context.bot)
         assert text == t(
-            "find.when_edit", "en", summary=html.escape(watch_summary(switched, "en"))
+            "find.when_again", "en", summary=html.escape(watch_summary(switched, "en"))
         )
         assert data_rows(markup)[0][0] == cb.find_edit_when(rec.id, "asap")
 

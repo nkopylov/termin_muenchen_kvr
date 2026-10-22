@@ -22,8 +22,12 @@ from src.ui.screens import forget_nav_message, retire_nav_message
 from src.ui.telegram_safe import EditOutcome, safe_edit_text, safe_send
 from src.watches import availability
 from src.watches import when as when_module
-from src.watches.alert_ops import alert_lock, close_live_alert
-from src.watches.alert_view import FinalState, render_alert
+from src.watches.alert_ops import (
+    alert_lock,
+    close_live_alert,
+    running_immediate_check,
+)
+from src.watches.alert_view import FinalState, render_alert, render_final
 from src.watches.labels import service_label
 from src.watches.when import WhenSpec
 
@@ -33,8 +37,9 @@ CHECKING_KEY = "checking"
 _SHOWN = (EditOutcome.OK, EditOutcome.NOT_MODIFIED)
 
 
-def build_limit_screen(lang: str) -> tuple[str, InlineKeyboardMarkup]:
-    """S10: the user already has the maximum number of open watches."""
+def build_limit_screen(lang: str, user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """S10: the user already has the maximum number of open watches (or more: migrated
+    users keep all their subscriptions)."""
     markup = InlineKeyboardMarkup(
         [
             [
@@ -44,7 +49,19 @@ def build_limit_screen(lang: str) -> tuple[str, InlineKeyboardMarkup]:
             ]
         ]
     )
-    return t("find.limit", lang, count=MAX_OPEN_WATCHES), markup
+    with get_session() as session:
+        open_count = WatchRepository(session).count_open(user_id)
+    if open_count > MAX_OPEN_WATCHES:
+        text = t(
+            "find.limit_over",
+            lang,
+            open=open_count,
+            limit=MAX_OPEN_WATCHES,
+            count=open_count - MAX_OPEN_WATCHES + 1,
+        )
+    else:
+        text = t("find.limit", lang, count=MAX_OPEN_WATCHES)
+    return text, markup
 
 
 async def _show_checking(
@@ -79,7 +96,7 @@ async def _show_limit(
     bot, user_id: int, chat_id: int, message_id: int, lang: str
 ) -> None:
     """S10 on the checking message; it becomes the nav screen unless a newer one exists."""
-    text, markup = build_limit_screen(lang)
+    text, markup = build_limit_screen(lang, user_id)
     outcome = await safe_edit_text(bot, chat_id, message_id, text, markup)
     if outcome not in _SHOWN:
         return
@@ -114,6 +131,14 @@ async def _detach_other_alerts(
                     watches.clear_live_alert(other_id, reset_alerted=False)
 
 
+def _final_state(rec) -> FinalState:
+    if rec.status == "paused":
+        return FinalState.PAUSED
+    if rec.end_reason in {state.value for state in FinalState}:
+        return FinalState(rec.end_reason)
+    return FinalState.STOPPED
+
+
 async def _check_and_show(
     bot,
     user_id: int,
@@ -123,42 +148,57 @@ async def _check_and_show(
     updated: bool,
     lang: str,
 ) -> None:
-    """Check the watch and make `message_id` its live alert; the caller holds alert_lock."""
+    """Check the watch and make `message_id` its live alert. alert_lock is taken only after
+    the city answered, so taps on the watch's messages never wait for the network."""
     with get_session() as session:
         rec = WatchRepository(session).get(watch_id)
     if rec is None:
         return
-    if rec.live is not None and (rec.live.chat_id, rec.live.message_id) != (
-        chat_id,
-        message_id,
-    ):
-        await close_live_alert(bot, watch_id, FinalState.OUTDATED, lang, by_user=True)
-
     snapshot = await availability.snapshot_for_watch(rec, when_module.today_berlin())
-    with get_session() as session:
-        WatchRepository(session).record_check(watch_id, snapshot)
 
-    rendered = render_alert(rec, snapshot, lang, initial=True, updated_existing=updated)
-    await _detach_other_alerts(user_id, chat_id, message_id, watch_id)
-    outcome = await safe_edit_text(
-        bot, chat_id, message_id, rendered.text, rendered.markup
-    )
-    with get_session() as session:
-        watches = WatchRepository(session)
-        if outcome in _SHOWN:
-            watches.set_live_alert(
-                watch_id,
-                chat_id,
-                message_id,
-                rendered.kind,
-                snapshot.slots,
-                snapshot.slots,
-                rendered.render_hash,
+    async with alert_lock(watch_id):
+        with get_session() as session:
+            rec = WatchRepository(session).get(watch_id)
+        if rec is None:
+            return
+        if rec.status != "active":
+            # Paused or stopped while the city was queried
+            text = render_final(rec, _final_state(rec), lang)
+            await safe_edit_text(bot, chat_id, message_id, text)
+            return
+        if rec.live is not None and (rec.live.chat_id, rec.live.message_id) != (
+            chat_id,
+            message_id,
+        ):
+            await close_live_alert(
+                bot, watch_id, FinalState.OUTDATED, lang, by_user=True
             )
-        else:
-            watches.clear_live_alert(watch_id, reset_alerted=True)
-            if outcome is EditOutcome.FORBIDDEN:
-                watches.pause_all_for_user(user_id, reason="blocked")
+
+        with get_session() as session:
+            WatchRepository(session).record_check(watch_id, snapshot)
+        rendered = render_alert(
+            rec, snapshot, lang, initial=True, updated_existing=updated
+        )
+        await _detach_other_alerts(user_id, chat_id, message_id, watch_id)
+        outcome = await safe_edit_text(
+            bot, chat_id, message_id, rendered.text, rendered.markup
+        )
+        with get_session() as session:
+            watches = WatchRepository(session)
+            if outcome in _SHOWN:
+                watches.set_live_alert(
+                    watch_id,
+                    chat_id,
+                    message_id,
+                    rendered.kind,
+                    snapshot.slots,
+                    snapshot.slots,
+                    rendered.render_hash,
+                )
+            else:
+                watches.clear_live_alert(watch_id, reset_alerted=True)
+                if outcome is EditOutcome.FORBIDDEN:
+                    watches.pause_all_for_user(user_id, reason="blocked")
 
 
 def _clear_checking(context: ContextTypes.DEFAULT_TYPE, message_id: int) -> None:
@@ -196,7 +236,7 @@ async def start_watch_check(
             except LimitReached:
                 await _show_limit(bot, user_id, chat_id, message_id, lang)
                 return
-            async with alert_lock(rec.id):
+            with running_immediate_check(rec.id):
                 await _check_and_show(
                     bot, user_id, chat_id, message_id, rec.id, updated, lang
                 )
@@ -265,7 +305,7 @@ async def start_recheck(
                 await _show_limit(bot, user_id, chat_id, message_id, lang)
                 return
             updated = rec.id != watch_id
-            async with alert_lock(rec.id):
+            with running_immediate_check(rec.id):
                 if updated:
                     await close_pressed_alert()
                 await _check_and_show(

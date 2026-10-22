@@ -14,6 +14,12 @@ def language_order(telegram_language_code: str | None) -> tuple[str, str]:
     return ("ru", "en") if base in RUSSIAN_LIKELY_CODES else ("en", "ru")
 
 
+def client_language(update: Update) -> str:
+    """Language for someone without a stored choice: their Telegram client's."""
+    user = update.effective_user
+    return language_order(user.language_code if user else None)[0]
+
+
 def build_language_picker(
     telegram_language_code: str | None,
 ) -> tuple[str, InlineKeyboardMarkup]:

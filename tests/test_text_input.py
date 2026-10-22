@@ -127,7 +127,7 @@ class TestSearch:
 
     async def test_unregistered_user(self, db, context):
         await send_text(context, "passport")
-        assert context.bot.sent[-1].text == t("find.not_registered", "en")
+        assert context.bot.sent[-1].text == t("start.not_registered", "en")
 
     async def test_previous_nav_screen_is_stripped(self, db, context):
         register(db)

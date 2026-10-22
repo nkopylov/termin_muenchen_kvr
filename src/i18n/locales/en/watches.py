@@ -3,11 +3,12 @@
 
 MESSAGES: dict[str, str | dict[str, str]] = {
     "watches.header": "👀 <b>My watches</b> ({count} of {limit})",
+    "watches.header_over": "👀 <b>My watches</b> ({count})",
     "watches.line": "<b>{n}.</b> {summary}\n      {state}{checked}",
     "watches.checked": " · checked {ago}",
     "watches.empty": (
         "👀 <b>My watches</b>\n\n"
-        "You're not watching anything yet. Tell me what you need, "
+        "You're not watching anything. Tell me what you need, "
         "and I'll look for a free Termin."
     ),
     "watches.btn_time": "{n}. 🕒 Time",
