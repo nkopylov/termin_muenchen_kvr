@@ -7,6 +7,8 @@ from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime
 
+from pydantic import NaiveDatetime
+
 
 class User(SQLModel, table=True):
     """User database model"""
@@ -15,7 +17,7 @@ class User(SQLModel, table=True):
 
     user_id: int = Field(primary_key=True)
     username: Optional[str] = Field(default=None, max_length=255)
-    subscribed_at: datetime = Field(default_factory=datetime.utcnow)
+    subscribed_at: NaiveDatetime = Field(default_factory=datetime.utcnow)
     start_date: Optional[str] = Field(default=None, max_length=10)
     end_date: Optional[str] = Field(default=None, max_length=10)
     language: str = Field(default="de", max_length=2)
@@ -33,7 +35,7 @@ class ServiceSubscription(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.user_id", index=True)
     service_id: int = Field(index=True)
     office_id: int
-    subscribed_at: datetime = Field(default_factory=datetime.utcnow)
+    subscribed_at: NaiveDatetime = Field(default_factory=datetime.utcnow)
 
     # Relationships
     user: Optional[User] = Relationship(back_populates="subscriptions")
@@ -49,7 +51,7 @@ class AppointmentLog(SQLModel, table=True):
     __tablename__ = "appointment_logs"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    found_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    found_at: NaiveDatetime = Field(default_factory=datetime.utcnow, index=True)
     service_id: int = Field(index=True)
     office_id: int
     data: str  # JSON string of appointment data
@@ -78,9 +80,9 @@ class BookingSession(SQLModel, table=True):
     email: Optional[str] = Field(default=None, max_length=255)
 
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: datetime  # Auto-cleanup after expiry
+    created_at: NaiveDatetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=datetime.utcnow)
+    expires_at: NaiveDatetime  # Auto-cleanup after expiry
 
     class Config:
         table_args = ({"sqlite_autoincrement": True},)

@@ -5,22 +5,22 @@ description = "Munich appointment booking notification bot"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "requests>=2.31.0",
-    "python-telegram-bot>=21.0",
-    "python-dotenv>=1.0.0",
+    "requests>=2.34.2",
+    "python-telegram-bot>=22.8",
+    "python-dotenv>=1.2.4",
     # Configuration & Validation
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.1",
     # Database
-    "sqlmodel>=0.0.14",
+    "sqlmodel>=0.0.48",
     # Analytics
-    "httpx>=0.27.0",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "mypy>=1.8.0",
-    "ruff>=0.1.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "mypy>=2.4.0",
+    "ruff>=0.17.1",
 ]
