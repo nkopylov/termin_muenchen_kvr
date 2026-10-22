@@ -3,15 +3,24 @@ Tests for booking flow state machine
 Tests the complex multi-step booking conversation flow
 """
 
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
 from src.commands.booking import (
     create_booking_session,
-    update_booking_session,
     delete_booking_session,
     get_booking_session,
+    update_booking_session,
 )
+
+
+@pytest.fixture(autouse=True)
+def english_user():
+    """Booking handlers read the user's language from the DB; these tests run without one."""
+    with patch("src.commands.booking.get_user_language", return_value="en"):
+        yield
 
 
 class TestBookingSessionManagement:
@@ -130,10 +139,10 @@ class TestBookingStateTransitions:
     def test_state_progression_order(self):
         """Test the expected order of booking states"""
         from src.commands.booking import (
-            SELECTING_TIME,
-            ASKING_NAME,
             ASKING_EMAIL,
+            ASKING_NAME,
             CONFIRMING,
+            SELECTING_TIME,
         )
 
         # Verify state constants are in correct order
@@ -150,8 +159,8 @@ class TestBookingStateTransitions:
         self, mock_update, mock_get_session
     ):
         """Test transition from SELECTING_TIME to ASKING_NAME"""
-        from src.db_models import BookingSession
         from src.commands.booking import time_selected
+        from src.db_models import BookingSession
 
         # Mock booking session
         mock_session = BookingSession(
@@ -267,8 +276,9 @@ class TestBookingCancellation:
     """Tests for booking cancellation flow"""
 
     @pytest.mark.asyncio
+    @patch("src.commands.booking.get_booking_session", return_value=None)
     @patch("src.commands.booking.delete_booking_session")
-    async def test_cancel_from_time_selection(self, mock_delete):
+    async def test_cancel_from_time_selection(self, mock_delete, mock_get_session):
         """Test canceling booking from time selection"""
         from src.commands.booking import time_selected
 
@@ -293,8 +303,9 @@ class TestBookingCancellation:
         assert result == ConversationHandler.END
 
     @pytest.mark.asyncio
+    @patch("src.commands.booking.get_booking_session", return_value=None)
     @patch("src.commands.booking.delete_booking_session")
-    async def test_cancel_from_button(self, mock_delete):
+    async def test_cancel_from_button(self, mock_delete, mock_get_session):
         """Test cancel booking button handler"""
         from src.commands.booking import cancel_booking_button
 

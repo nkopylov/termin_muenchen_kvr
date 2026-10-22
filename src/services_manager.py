@@ -4,31 +4,33 @@ Fetches and caches service categories and information.
 """
 
 import logging
-from typing import Dict, List, Optional
 from collections import defaultdict
 
+from src.i18n import t
 from src.munich_api_client import get_api_client
 
 logger = logging.getLogger(__name__)
 
-# Category definitions
+# Category definitions keyed by stable id; labels are i18n keys "categories.<id>"
+OTHER_CATEGORY = "sonstiges"
+
 CATEGORY_KEYWORDS = {
-    "Ausländerbehörde 🌍": [
+    "auslaenderbehoerde": [
         "Aufenthaltstitel",
         "Duldung",
         "eAT",
         "Verpflichtungserklärung",
     ],
-    "Ausweis & Pass 🆔": ["Personalausweis", "Reisepass", "eID"],
-    "Fahrzeug 🚗": ["Fahrzeug", "KfZ", "Kfz", "Kennzeichen", "Zulassung"],
-    "Führerschein 🪪": [
+    "ausweis": ["Personalausweis", "Reisepass", "eID"],
+    "fahrzeug": ["Fahrzeug", "KfZ", "Kfz", "Kennzeichen", "Zulassung"],
+    "fuehrerschein": [
         "Führerschein",
         "Fahrerlaubnis",
         "Fahrerqualifizierung",
         "Personenbeförderungsschein",
     ],
-    "Wohnsitz 🏠": ["Wohnsitz", "Melde", "Adress"],
-    "Gewerbe 💼": [
+    "wohnsitz": ["Wohnsitz", "Melde", "Adress"],
+    "gewerbe": [
         "Gewerbe",
         "Taxi",
         "Mietwagen",
@@ -37,15 +39,15 @@ CATEGORY_KEYWORDS = {
         "Pfandleiher",
         "Versteigerung",
     ],
-    "Familie 👨\u200d👩\u200d👧": [
+    "familie": [
         "Eheschließung",
         "Unterhaltsvorschuss",
         "Vaterschaft",
         "Elternberatung",
     ],
-    "Rente & Soziales 🏥": ["Rente", "Versicherung", "BAföG", "Sozial"],
-    "Parken 🅿️": ["Park", "Bewohner"],
-    "Sonstiges 📋": [],
+    "soziales": ["Rente", "Versicherung", "BAföG", "Sozial"],
+    "parken": ["Park", "Bewohner"],
+    OTHER_CATEGORY: [],
 }
 
 # Cache for services
@@ -53,7 +55,7 @@ _services_cache = None
 _full_payload_cache = None
 
 
-def fetch_services() -> Optional[List[Dict]]:
+def fetch_services() -> list[dict] | None:
     """Fetch all available services from API"""
     services = get_full_payload().get("services", [])
 
@@ -65,7 +67,7 @@ def fetch_services() -> Optional[List[Dict]]:
         return None
 
 
-def fetch_full_payload() -> Optional[Dict]:
+def fetch_full_payload() -> dict | None:
     """
     Fetch the complete offices-and-services payload.
     This contains offices, services, and relations arrays.
@@ -84,7 +86,7 @@ def fetch_full_payload() -> Optional[Dict]:
         return None
 
 
-def get_services() -> List[Dict]:
+def get_services() -> list[dict]:
     """Get services (cached)"""
     global _services_cache
     if _services_cache is None:
@@ -92,7 +94,7 @@ def get_services() -> List[Dict]:
     return _services_cache or []
 
 
-def get_full_payload() -> Dict:
+def get_full_payload() -> dict:
     """Get full payload (cached)"""
     global _full_payload_cache
     if _full_payload_cache is None:
@@ -100,8 +102,8 @@ def get_full_payload() -> Dict:
     return _full_payload_cache or {"offices": [], "services": [], "relations": []}
 
 
-def categorize_services() -> Dict[str, List[Dict]]:
-    """Organize services into categories"""
+def categorize_services() -> dict[str, list[dict]]:
+    """Organize services into categories, keyed by category id"""
     services = get_services()
     categories = defaultdict(list)
 
@@ -111,7 +113,7 @@ def categorize_services() -> Dict[str, List[Dict]]:
         categorized = False
 
         for category, keywords in CATEGORY_KEYWORDS.items():
-            if category == "Sonstiges 📋":
+            if category == OTHER_CATEGORY:
                 continue
             for keyword in keywords:
                 if keyword.lower() in name.lower():
@@ -128,7 +130,7 @@ def categorize_services() -> Dict[str, List[Dict]]:
                 break
 
         if not categorized:
-            categories["Sonstiges 📋"].append(
+            categories[OTHER_CATEGORY].append(
                 {"id": sid, "name": name, "maxQuantity": service.get("maxQuantity", 1)}
             )
 
@@ -139,7 +141,7 @@ def categorize_services() -> Dict[str, List[Dict]]:
     return dict(categories)
 
 
-def get_service_info(service_id: int) -> Optional[Dict]:
+def get_service_info(service_id: int) -> dict | None:
     """Get detailed information for a specific service"""
     services = get_services()
     for service in services:
@@ -148,8 +150,8 @@ def get_service_info(service_id: int) -> Optional[Dict]:
     return None
 
 
-def get_category_for_service(service_id: int) -> Optional[str]:
-    """Find which category a service belongs to"""
+def get_category_for_service(service_id: int) -> str | None:
+    """Find the id of the category a service belongs to"""
     categories = categorize_services()
     for category, services in categories.items():
         for service in services:
@@ -158,7 +160,7 @@ def get_category_for_service(service_id: int) -> Optional[str]:
     return None
 
 
-def get_offices_for_service(service_id: int) -> List[Dict]:
+def get_offices_for_service(service_id: int) -> list[dict]:
     """
     Get designated offices for a specific service from the relations array.
     This returns ONLY the offices that are designated for appointment booking,
@@ -186,12 +188,17 @@ def get_offices_for_service(service_id: int) -> List[Dict]:
     return offices
 
 
-def get_office_name(office_id: int) -> str:
+def get_office_name(office_id: int, lang: str | None = None) -> str:
     """
-    Get office name by ID. Returns 'Office {id}' if not found.
+    Get office name by ID. Returns 'Office {id}' if not found, or its
+    translation in `lang` when a language is given.
     """
+    if lang is None:
+        fallback = f"Office {office_id}"
+    else:
+        fallback = t("buttons.office_fallback", lang, office_id=office_id)
     payload = get_full_payload()
     for office in payload.get("offices", []):
         if office["id"] == office_id:
-            return office.get("name", f"Office {office_id}")
-    return f"Office {office_id}"
+            return office.get("name", fallback)
+    return fallback

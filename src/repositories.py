@@ -25,7 +25,7 @@ class UserRepository:
         self,
         user_id: int,
         username: Optional[str] = None,
-        language: str = "de",
+        language: str = "",
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> User:
@@ -43,7 +43,7 @@ class UserRepository:
         return user
 
     def get_or_create_user(
-        self, user_id: int, username: Optional[str] = None, language: str = "de"
+        self, user_id: int, username: Optional[str] = None, language: str = ""
     ) -> User:
         """Get existing user or create new one"""
         user = self.get_user(user_id)
@@ -59,6 +59,15 @@ class UserRepository:
         user.start_date = start_date
         user.end_date = end_date
         self.session.commit()
+
+    def set_language(self, user_id: int, language: str) -> bool:
+        """Set user's interface language; returns False if the user does not exist"""
+        user = self.get_user(user_id)
+        if user is None:
+            return False
+        user.language = language
+        self.session.commit()
+        return True
 
     def get_all_users(self) -> List[User]:
         """Get all users"""

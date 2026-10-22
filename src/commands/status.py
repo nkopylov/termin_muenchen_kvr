@@ -3,18 +3,21 @@
 """
 
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from src.database import get_session
-from src.repositories import (
-    UserRepository,
-    SubscriptionRepository,
-    AppointmentLogRepository,
-)
-from src.services.appointment_checker import get_user_date_range, get_stats
 from src.config import get_config
-from datetime import datetime
+from src.database import get_session
+from src.i18n import t
+from src.i18n.user_language import get_user_language
+from src.repositories import (
+    AppointmentLogRepository,
+    SubscriptionRepository,
+    UserRepository,
+)
+from src.services.appointment_checker import get_stats, get_user_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show bot status"""
     user_id = update.effective_user.id
+    lang = get_user_language(user_id, context)
 
     with get_session() as session:
         user_repo = UserRepository(session)
@@ -30,13 +34,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         user = user_repo.get_user(user_id)
         if not user:
-            await update.message.reply_text(
-                "❌ You are not registered.\n\nUse /start to register."
-            )
+            await update.message.reply_text(t("status.not_registered", lang))
             return
 
         subs = sub_repo.get_user_subscriptions(user_id)
-        user_language = user.language
         num_subs = len(subs)
 
         # Get user-specific appointment stats
@@ -57,21 +58,29 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if last_check:
         time_since_check = (datetime.now() - last_check).total_seconds()
         if time_since_check < 60:
-            last_check_str = f"{int(time_since_check)} seconds ago"
+            last_check_str = t("status.seconds_ago", lang, count=int(time_since_check))
         elif time_since_check < 3600:
-            last_check_str = f"{int(time_since_check / 60)} minutes ago"
+            last_check_str = t(
+                "status.minutes_ago", lang, count=int(time_since_check / 60)
+            )
         else:
-            last_check_str = f"{int(time_since_check / 3600)} hours ago"
+            last_check_str = t(
+                "status.hours_ago", lang, count=int(time_since_check / 3600)
+            )
 
         # Calculate next check estimate
         next_check_seconds = max(0, check_interval - time_since_check)
         if next_check_seconds < 60:
-            next_check_str = f"~{int(next_check_seconds)} seconds"
+            next_check_str = t(
+                "status.next_in_seconds", lang, count=int(next_check_seconds)
+            )
         else:
-            next_check_str = f"~{int(next_check_seconds / 60)} minutes"
+            next_check_str = t(
+                "status.next_in_minutes", lang, count=int(next_check_seconds / 60)
+            )
     else:
-        last_check_str = "Never"
-        next_check_str = "Soon"
+        last_check_str = t("status.last_check_never", lang)
+        next_check_str = t("status.next_check_soon", lang)
 
     # User-specific appointment stats
     user_appointments_count = len(user_appointments)
@@ -83,34 +92,45 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 latest_dt = datetime.fromisoformat(latest_time)
                 days_ago = (datetime.now() - latest_dt).days
                 if days_ago == 0:
-                    latest_str = "today"
+                    latest_str = t("status.found_today", lang)
                 elif days_ago == 1:
-                    latest_str = "yesterday"
+                    latest_str = t("status.found_yesterday", lang)
                 else:
-                    latest_str = f"{days_ago} days ago"
+                    latest_str = t("status.found_days_ago", lang, count=days_ago)
             except (ValueError, TypeError):
-                latest_str = "recently"
+                latest_str = t("status.found_recently", lang)
         else:
-            latest_str = "recently"
-        stats_line = (
-            f"\n🎯 Appointments found: {user_appointments_count} (last: {latest_str})"
+            latest_str = t("status.found_recently", lang)
+        stats_line = t(
+            "status.appointments_found",
+            lang,
+            found=user_appointments_count,
+            latest=latest_str,
         )
     else:
-        stats_line = "\n🎯 Appointments found: 0"
+        stats_line = t("status.appointments_found_none", lang)
 
-    message = (
-        "📊 <b>Your Status</b>\n\n"
-        f"👤 User ID: <code>{user_id}</code>\n"
-        f"📋 Subscriptions: <b>{num_subs}</b>\n"
-        f"📅 Date Range: {start_date} to {end_date}\n"
-        f"🌐 Language: {user_language}\n\n"
-        f"🔍 Last checked: {last_check_str}\n"
-        f"⏱ Next check in: {next_check_str}\n"
-        f"⚙️ Check interval: {check_interval} seconds"
-        f"{stats_line}"
+    message = t(
+        "status.message",
+        lang,
+        user_id=user_id,
+        num_subs=num_subs,
+        start_date=start_date,
+        end_date=end_date,
+        language=t(f"language.btn_{lang}", lang),
+        last_check=last_check_str,
+        next_check=next_check_str,
+        check_interval=t("status.interval_seconds", lang, count=check_interval),
+        stats_line=stats_line,
     )
 
-    keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                t("common.btn_main_menu", lang), callback_data="main_menu"
+            )
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
