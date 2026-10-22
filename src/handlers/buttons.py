@@ -118,7 +118,6 @@ async def show_status_inline(query, user_id: int, lang: str | None = None):
 
         subs = sub_repo.get_user_subscriptions(user_id)
         total_users = len(user_repo.get_all_users())
-        user_language = user.language
         num_subs = len(subs)
 
         # Get user-specific appointment stats
@@ -198,10 +197,10 @@ async def show_status_inline(query, user_id: int, lang: str | None = None):
         num_subs=num_subs,
         start_date=start_date,
         end_date=end_date,
-        language=user_language,
+        language=t(f"language.btn_{lang}", lang),
         last_check=last_check_str,
         next_check=next_check_str,
-        check_interval=check_interval,
+        check_interval=t("status.interval_seconds", lang, count=check_interval),
         stats_line=stats_line,
         total_users=total_users,
     )
@@ -338,7 +337,11 @@ async def show_category_services(query, category_id: str, page: int, lang: str):
                 callback_data=f"catpage:{category_id}:{page - 1}",
             )
         )
-    nav_row.append(main_menu_button(lang))
+    nav_row.append(
+        InlineKeyboardButton(
+            t("common.btn_menu_short", lang), callback_data="main_menu"
+        )
+    )
     if page < total_pages - 1:
         nav_row.append(
             InlineKeyboardButton(

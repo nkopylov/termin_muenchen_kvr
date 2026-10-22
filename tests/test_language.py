@@ -2,8 +2,13 @@
 # ABOUTME: Telegram objects are stubbed at the boundary; DB state is real (in-memory or temp file SQLite).
 
 import logging
+import os
+import sqlite3
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -608,3 +613,27 @@ class TestLanguageResetMigration:
 
         assert self._user_version(engine) == 1
         assert stored_language(engine, 1) == "ru"
+
+    def test_init_creates_tables_without_prior_model_import(self, tmp_path):
+        db_file = tmp_path / "fresh.db"
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from src.database import init_database; init_database()",
+            ],
+            cwd=Path(__file__).resolve().parent.parent,
+            env={**os.environ, "DB_FILE": str(db_file)},
+            check=True,
+            capture_output=True,
+        )
+        with sqlite3.connect(db_file) as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert "users" in tables
+        assert version == 1

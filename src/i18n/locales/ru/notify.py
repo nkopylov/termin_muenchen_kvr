@@ -7,7 +7,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "<b>{service_name}</b>\n\n"
         "Свободные записи:\n{dates}\n\n"
         "🔗 <a href='{booking_url}'>Записаться сейчас!</a>\n\n"
-        "⏳ Загружаем свободное время..."
+        "⏳ Загружаю свободное время..."
     ),
     "notify.final": (
         "🎉 <b>ЕСТЬ СВОБОДНАЯ ЗАПИСЬ!</b> 🎉\n\n"

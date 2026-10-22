@@ -38,7 +38,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         subs = sub_repo.get_user_subscriptions(user_id)
-        user_language = user.language
         num_subs = len(subs)
 
         # Get user-specific appointment stats
@@ -118,7 +117,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         num_subs=num_subs,
         start_date=start_date,
         end_date=end_date,
-        language=user_language,
+        language=t(f"language.btn_{lang}", lang),
         last_check=last_check_str,
         next_check=next_check_str,
         check_interval=t("status.interval_seconds", lang, count=check_interval),

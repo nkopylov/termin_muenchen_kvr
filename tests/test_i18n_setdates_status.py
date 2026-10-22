@@ -190,7 +190,7 @@ class TestSetdatesValidation:
         sent = await run_setdates(["a", "b", "c"])
         assert sent.text == (
             "❌ Неверный формат.\n\n"
-            "Использование: <code>/setdates ГГГГ-ММ-ДД ГГГГ-ММ-ДД</code>\n\n"
+            "Правильно так: <code>/setdates ГГГГ-ММ-ДД ГГГГ-ММ-ДД</code>\n\n"
             "Пример:\n"
             "<code>/setdates 2025-10-01 2025-10-31</code>\n\n"
             "Или отправьте /setdates без параметров, чтобы выбрать готовый период."
@@ -209,7 +209,7 @@ class TestSetdatesValidation:
         add_user(db, "ru")
         sent = await run_setdates(["2025-13-01", "2025-10-31"])
         assert sent.text == (
-            "❌ Неверный формат даты. Используйте ГГГГ-ММ-ДД\n\n"
+            "❌ Неверный формат даты. Укажите дату в виде ГГГГ-ММ-ДД.\n\n"
             "Пример: <code>/setdates 2025-10-01 2025-10-31</code>"
         )
 
@@ -246,7 +246,7 @@ class TestSetdatesSuccess:
             "✅ Период дат обновлён!\n\n"
             "Начало: <b>2025-10-01</b>\n"
             "Окончание: <b>2025-10-31</b>\n\n"
-            "Теперь бот будет искать свободные записи в этом периоде дат."
+            "Теперь бот будет искать свободные записи в этот период."
         )
         with Session(db) as session:
             user = session.get(User, USER_ID)
@@ -306,7 +306,7 @@ class TestStatusScreen:
             f"👤 User ID: <code>{USER_ID}</code>\n"
             "📋 Subscriptions: <b>1</b>\n"
             "📅 Date Range: 2025-10-01 to 2025-10-31\n"
-            "🌐 Language: en\n\n"
+            "🌐 Language: 🇬🇧 English\n\n"
             "🔍 Last checked: 10 seconds ago\n"
             "⏱ Next check in: ~1 minutes\n"
             "⚙️ Check interval: 120 seconds"
@@ -325,7 +325,7 @@ class TestStatusScreen:
             f"👤 ID пользователя: <code>{USER_ID}</code>\n"
             "📋 Подписки: <b>1</b>\n"
             "📅 Период дат: 2025-10-01 — 2025-10-31\n"
-            "🌐 Язык: ru\n\n"
+            "🌐 Язык: 🇷🇺 Русский\n\n"
             "🔍 Последняя проверка: 10 секунд назад\n"
             "⏱ Следующая проверка: через ~1 минуту\n"
             "⚙️ Интервал проверки: 120 секунд"
@@ -334,11 +334,11 @@ class TestStatusScreen:
         assert sent.parse_mode == "HTML"
         assert buttons(sent.reply_markup) == [("🏠 Главное меню", "main_menu")]
 
-    async def test_unset_language_shows_stored_value(self, db, checker):
+    async def test_unset_language_shows_english(self, db, checker):
         add_user(db, "")
         checker(None)
         sent = await run_status()
-        assert "🌐 Language: \n" in sent.text
+        assert "🌐 Language: 🇬🇧 English\n" in sent.text
 
     async def test_never_checked_english(self, db, checker):
         add_user(db, "en")

@@ -8,7 +8,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     ),
     "myservices.header": "📋 <b>Ваши подписки</b>\n\nВы отслеживаете эти услуги:\n\n",
     "myservices.item": (
-        "• <b>{service}</b>\n   📍 {office}\n   📅 Подписка от: {date}\n\n"
+        "• <b>{service}</b>\n   📍 {office}\n   📅 Подписка оформлена: {date}\n\n"
     ),
     "myservices.unknown_office": "Неизвестное отделение",
     "myservices.total": {

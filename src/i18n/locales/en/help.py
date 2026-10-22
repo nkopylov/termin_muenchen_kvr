@@ -20,6 +20,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "<b>/myservices</b> - View and manage your subscriptions\n"
         "<b>/setdates</b> - Set your preferred date range\n"
         "<b>/status</b> - Check your account status and stats\n"
+        "<b>/language</b> - Change language\n"
         "<b>/stop</b> - Unsubscribe from all services and delete data\n"
         "<b>/help</b> - Show this help message\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"

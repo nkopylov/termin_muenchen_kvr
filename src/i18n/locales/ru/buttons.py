@@ -5,10 +5,10 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "buttons.menu_text": "🏠 <b>Главное меню</b>\n\nВыберите действие:",
     "buttons.btn_subscribe_termins": "📋 Подписаться на свободные записи",
     "buttons.btn_my_subscriptions": "📊 Мои подписки",
-    "buttons.btn_set_dates": "📅 Задать период дат",
+    "buttons.btn_set_dates": "📅 Выбрать период дат",
     "buttons.btn_status": "ℹ️ Статус подписки",
     "buttons.not_registered": (
-        "❌ Вы не зарегистрированы.\n\nИспользуйте /start для регистрации."
+        "❌ Вы не зарегистрированы.\n\nЧтобы зарегистрироваться, отправьте /start."
     ),
     "buttons.seconds_ago": {
         "one": "{count} секунду назад",
@@ -35,7 +35,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "few": "через ~{count} минуты",
         "many": "через ~{count} минут",
     },
-    "buttons.never": "никогда",
+    "buttons.never": "ещё не проводилась",
     "buttons.soon": "скоро",
     "buttons.today": "сегодня",
     "buttons.yesterday": "вчера",
@@ -55,14 +55,14 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "🌐 Язык: {language}\n\n"
         "🔍 Последняя проверка: {last_check}\n"
         "⏱ Следующая проверка: {next_check}\n"
-        "⚙️ Интервал проверки: {check_interval} с"
+        "⚙️ Интервал проверки: {check_interval}"
         "{stats_line}\n\n"
         "👥 Всего пользователей: <b>{total_users}</b>"
     ),
     "buttons.setdates": (
-        "📅 <b>Задать период дат</b>\n\n"
+        "📅 <b>Выбор периода дат</b>\n\n"
         "Текущий период: <b>{start_date}</b> — <b>{end_date}</b>\n\n"
-        "Выберите готовый вариант или задайте свой период:\n\n"
+        "Выберите готовый период или укажите свой:\n\n"
         "<b>Свой период:</b>\n"
         "<code>/setdates ГГГГ-ММ-ДД ГГГГ-ММ-ДД</code>\n\n"
         "<b>Пример:</b> <code>/setdates 2025-10-01 2025-10-31</code>"

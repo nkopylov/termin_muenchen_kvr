@@ -8,6 +8,6 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "menu.title": "🏠 <b>Главное меню</b>\n\nВыберите действие:",
     "menu.btn_subscribe": "📋 Подписаться на свободные записи",
     "menu.btn_myservices": "📊 Мои подписки",
-    "menu.btn_setdates": "📅 Указать период дат",
+    "menu.btn_setdates": "📅 Выбрать период дат",
     "menu.btn_status": "ℹ️ Статус подписки",
 }

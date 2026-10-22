@@ -221,7 +221,7 @@ class TestMainMenu:
         assert buttons(query.last.reply_markup) == [
             ("📋 Подписаться на свободные записи", "categories"),
             ("📊 Мои подписки", "myservices"),
-            ("📅 Задать период дат", "setdates"),
+            ("📅 Выбрать период дат", "setdates"),
             ("ℹ️ Статус подписки", "status"),
             ("🌐 Язык", "language"),
         ]
@@ -285,7 +285,7 @@ class TestCategoryServices:
             "srv:100",
         )
         assert buttons(query.last.reply_markup)[-2:] == [
-            ("🏠 Главное меню", "main_menu"),
+            ("🏠 Меню", "main_menu"),
             ("Далее ▶️", "catpage:fuehrerschein:1"),
         ]
 
@@ -303,10 +303,10 @@ class TestCategoryServices:
         add_user_lang(db, "ru")
         query = await press("catpage:fuehrerschein:1")
         assert query.last.text == "<b>Водительские права 🪪</b>\n\nУслуги 11–11 из 11"
-        assert buttons(query.last.reply_markup)[-2] == (
-            "◀️ Назад",
-            "catpage:fuehrerschein:0",
-        )
+        assert buttons(query.last.reply_markup)[-2:] == [
+            ("◀️ Назад", "catpage:fuehrerschein:0"),
+            ("🏠 Меню", "main_menu"),
+        ]
 
     async def test_empty_category(self, db):
         add_user(db, "en")
@@ -691,9 +691,9 @@ class TestSetDates:
         add_user(db, "ru")
         query = await press("setdates")
         assert query.last.text == (
-            "📅 <b>Задать период дат</b>\n\n"
+            "📅 <b>Выбор периода дат</b>\n\n"
             f"Текущий период: <b>{START}</b> — <b>{END}</b>\n\n"
-            "Выберите готовый вариант или задайте свой период:\n\n"
+            "Выберите готовый период или укажите свой:\n\n"
             "<b>Свой период:</b>\n"
             "<code>/setdates ГГГГ-ММ-ДД ГГГГ-ММ-ДД</code>\n\n"
             "<b>Пример:</b> <code>/setdates 2025-10-01 2025-10-31</code>"
@@ -735,7 +735,7 @@ class TestStatus:
     async def test_not_registered_russian_cache(self, db):
         query = await press("status", SimpleNamespace(user_data={"lang": "ru"}))
         assert query.last.text == (
-            "❌ Вы не зарегистрированы.\n\nИспользуйте /start для регистрации."
+            "❌ Вы не зарегистрированы.\n\nЧтобы зарегистрироваться, отправьте /start."
         )
         assert buttons(query.last.reply_markup) == [("🏠 Главное меню", "main_menu")]
 
@@ -748,7 +748,7 @@ class TestStatus:
             f"👤 User ID: <code>{USER_ID}</code>\n"
             "📋 Subscriptions: <b>0</b>\n"
             f"📅 Date Range: {START} to {END}\n"
-            "🌐 Language: en\n\n"
+            "🌐 Language: 🇬🇧 English\n\n"
             "🔍 Last checked: Never\n"
             "⏱ Next check in: Soon\n"
             f"⚙️ Check interval: {interval} seconds"
@@ -757,19 +757,19 @@ class TestStatus:
         )
         assert buttons(query.last.reply_markup) == [("🏠 Main Menu", "main_menu")]
 
-    async def test_russian_never_checked(self, db, check_stats):
+    async def test_russian_never_checked(self, db, check_stats, monkeypatch):
         add_user(db, "ru")
-        interval = get_config().check_interval
+        monkeypatch.setattr(get_config(), "check_interval", 120)
         query = await press("status")
         assert query.last.text == (
             "📊 <b>Ваш статус</b>\n\n"
             f"👤 ID пользователя: <code>{USER_ID}</code>\n"
             "📋 Подписки: <b>0</b>\n"
             f"📅 Период дат: {START} — {END}\n"
-            "🌐 Язык: ru\n\n"
-            "🔍 Последняя проверка: никогда\n"
+            "🌐 Язык: 🇷🇺 Русский\n\n"
+            "🔍 Последняя проверка: ещё не проводилась\n"
             "⏱ Следующая проверка: скоро\n"
-            f"⚙️ Интервал проверки: {interval} с"
+            "⚙️ Интервал проверки: 120 секунд"
             "\n🎯 Найдено записей: 0\n\n"
             "👥 Всего пользователей: <b>1</b>"
         )
@@ -798,6 +798,24 @@ class TestStatus:
         query = await press("status")
         assert "🔍 Last checked: 2 minutes ago\n" in query.last.text
         assert "\n🎯 Appointments found: 1 (last: 3 days ago)\n" in query.last.text
+
+    @pytest.mark.parametrize(
+        ("lang", "interval", "expected"),
+        [
+            ("en", 120, "⚙️ Check interval: 120 seconds\n"),
+            ("en", 1, "⚙️ Check interval: 1 seconds\n"),
+            ("ru", 120, "⚙️ Интервал проверки: 120 секунд\n"),
+            ("ru", 21, "⚙️ Интервал проверки: 21 секунда\n"),
+            ("ru", 22, "⚙️ Интервал проверки: 22 секунды\n"),
+        ],
+    )
+    async def test_check_interval_unit(
+        self, db, check_stats, monkeypatch, lang, interval, expected
+    ):
+        add_user(db, lang)
+        monkeypatch.setattr(get_config(), "check_interval", interval)
+        query = await press("status")
+        assert expected in query.last.text
 
 
 @pytest.mark.asyncio

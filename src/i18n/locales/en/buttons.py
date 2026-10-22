@@ -47,7 +47,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "🌐 Language: {language}\n\n"
         "🔍 Last checked: {last_check}\n"
         "⏱ Next check in: {next_check}\n"
-        "⚙️ Check interval: {check_interval} seconds"
+        "⚙️ Check interval: {check_interval}"
         "{stats_line}\n\n"
         "👥 Total Users: <b>{total_users}</b>"
     ),

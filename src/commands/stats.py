@@ -4,12 +4,15 @@
 
 import logging
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from src.config import get_config
 from src.database import get_session
-from src.repositories import UserRepository, SubscriptionRepository
+from src.i18n import t
+from src.i18n.user_language import get_user_language
+from src.repositories import SubscriptionRepository, UserRepository
 from src.services.appointment_checker import get_stats
 
 logger = logging.getLogger(__name__)
@@ -22,9 +25,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Check if user is admin
     if not config.admin_telegram_id or user_id != config.admin_telegram_id:
-        await update.message.reply_text(
-            "⛔️ This command is only available to the bot administrator."
-        )
+        lang = get_user_language(user_id, context)
+        await update.message.reply_text(t("common.admin_only", lang))
         logger.warning(f"User {user_id} attempted to access /stats command")
         return
 

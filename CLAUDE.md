@@ -49,6 +49,7 @@ python3 telegram_bot.py
 │   │   └── booking.py          # Booking conversation handler
 │   ├── handlers/                # Event handlers
 │   │   └── buttons.py          # Inline button callbacks
+│   ├── i18n/                    # Bot text in English and Russian, t() and user language (see DOCS/I18N.md)
 │   ├── config.py               # Pydantic Settings
 │   ├── database.py             # Session management
 │   ├── db_models.py            # SQLModel ORM models

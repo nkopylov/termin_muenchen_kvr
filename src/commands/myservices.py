@@ -31,7 +31,7 @@ async def myservices_command(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    t("menu.btn_subscribe", lang), callback_data="main_menu"
+                    t("menu.btn_subscribe", lang), callback_data="categories"
                 )
             ],
             [
@@ -55,7 +55,7 @@ async def myservices_command(
         if service_info:
             office_id = sub.get("office_id")
             office_name = (
-                get_office_name(office_id)
+                get_office_name(office_id, lang)
                 if office_id
                 else t("myservices.unknown_office", lang)
             )
@@ -90,7 +90,7 @@ async def myservices_command(
     keyboard.append(
         [
             InlineKeyboardButton(
-                t("myservices.btn_subscribe_more", lang), callback_data="subscribe"
+                t("myservices.btn_subscribe_more", lang), callback_data="categories"
             )
         ]
     )

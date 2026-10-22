@@ -1,6 +1,7 @@
 # ABOUTME: Tests that /help, /menu, /stop, /subscribe and /myservices reply in the user's language.
 # ABOUTME: Telegram and the city API are stubbed at the boundary; DB state is real in-memory SQLite.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
@@ -13,8 +14,10 @@ from src.commands import stop as stop_module
 from src.commands.help import help_command
 from src.commands.menu import menu_command
 from src.commands.myservices import myservices_command
+from src.commands.stats import stats_command
 from src.commands.stop import stop_command
 from src.commands.subscribe import subscribe_command
+from src.config import get_config
 from src.db_models import ServiceSubscription, User
 from src.repositories import SubscriptionRepository, UserRepository
 
@@ -132,6 +135,7 @@ HELP_EN = (
     "<b>/myservices</b> - View and manage your subscriptions\n"
     "<b>/setdates</b> - Set your preferred date range\n"
     "<b>/status</b> - Check your account status and stats\n"
+    "<b>/language</b> - Change language\n"
     "<b>/stop</b> - Unsubscribe from all services and delete data\n"
     "<b>/help</b> - Show this help message\n\n"
     "━━━━━━━━━━━━━━━━━━━━\n"
@@ -185,6 +189,7 @@ USER_COMMANDS = [
     "/myservices",
     "/setdates",
     "/status",
+    "/language",
     "/stop",
     "/help",
 ]
@@ -203,7 +208,6 @@ class TestHelp:
         sent = await reply_of(help_command)
         assert sent.text.startswith("📚 <b>Помощь и инструкция</b>\n\n")
         assert "<b>🚀 С ЧЕГО НАЧАТЬ</b>" in sent.text
-        assert "/language" not in sent.text
         assert "https://github.com/nkopylov/termin_muenchen_kvr" in sent.text
         assert "Help" not in sent.text
         assert sent.parse_mode == "HTML"
@@ -213,7 +217,8 @@ class TestHelp:
     async def test_lists_every_user_command_in_order(self, db, lang):
         add_user(db, lang)
         text = (await reply_of(help_command)).text
-        positions = [text.index(f"<b>{cmd}</b> - ") for cmd in USER_COMMANDS]
+        separator = {"en": " - ", "ru": " — "}[lang]
+        positions = [text.index(f"<b>{cmd}</b>{separator}") for cmd in USER_COMMANDS]
         assert positions == sorted(positions)
 
     async def test_same_layout_in_both_languages(self, db):
@@ -249,7 +254,7 @@ class TestMenu:
         assert buttons(sent.reply_markup) == [
             ("📋 Подписаться на свободные записи", "categories"),
             ("📊 Мои подписки", "myservices"),
-            ("📅 Указать период дат", "setdates"),
+            ("📅 Выбрать период дат", "setdates"),
             ("ℹ️ Статус подписки", "status"),
             ("🌐 Язык", "language"),
         ]
@@ -280,9 +285,9 @@ class TestStop:
     @pytest.mark.parametrize(
         ("pairs", "removed"),
         [
-            ([(1, 10)], "удалена 1 подписка"),
-            ([(1, 10), (2, 10)], "удалены 2 подписки"),
-            ([], "удалено 0 подписок"),
+            ([(1, 10)], "Удалена 1 подписка"),
+            ([(1, 10), (2, 10)], "Удалены 2 подписки"),
+            ([], "Удалено 0 подписок"),
         ],
     )
     async def test_russian_uses_language_read_before_deletion(
@@ -292,7 +297,7 @@ class TestStop:
         add_subscriptions(db, *pairs)
         sent = await reply_of(stop_command)
         assert sent.text == (
-            f"👋 Вы отписались, {removed}.\n\n"
+            f"👋 Вы отписались от всех услуг. {removed}.\n\n"
             "Чтобы зарегистрироваться снова, используйте /start."
         )
         with Session(db) as session:
@@ -323,7 +328,7 @@ class TestSubscribe:
         sent = await reply_of(subscribe_command)
         assert sent.text == (
             "📋 <b>Выберите категорию:</b>\n\n"
-            "Выберите категорию услуг, чтобы увидеть доступные услуги."
+            "В каждой категории — список доступных услуг."
         )
         assert buttons(sent.reply_markup) == [
             ("Ausländerbehörde 🌍 (1)", "cat:auslaenderbehoerde"),
@@ -341,7 +346,7 @@ class TestMyServices:
             "Use /subscribe to start monitoring appointment availability!"
         )
         assert buttons(sent.reply_markup) == [
-            ("📋 Subscribe to available Termins", "main_menu"),
+            ("📋 Subscribe to available Termins", "categories"),
             ("🏠 Main Menu", "main_menu"),
         ]
 
@@ -353,7 +358,7 @@ class TestMyServices:
             "Используйте /subscribe, чтобы начать отслеживать свободные записи!"
         )
         assert buttons(sent.reply_markup) == [
-            ("📋 Подписаться на свободные записи", "main_menu"),
+            ("📋 Подписаться на свободные записи", "categories"),
             ("🏠 Главное меню", "main_menu"),
         ]
 
@@ -374,7 +379,7 @@ class TestMyServices:
         assert buttons(sent.reply_markup) == [
             ("🗑 Aufenthaltstitel verlängern", "unsub:1"),
             ("🗑 Reisepass beantragen für Er...", "unsub:2"),
-            ("📋 Subscribe to More", "subscribe"),
+            ("📋 Subscribe to More", "categories"),
             ("🗑 Unsubscribe from All", "unsub_all"),
             ("🏠 Main Menu", "main_menu"),
         ]
@@ -387,16 +392,16 @@ class TestMyServices:
             "📋 <b>Ваши подписки</b>\n\nВы отслеживаете эти услуги:\n\n"
             "• <b>Aufenthaltstitel verlängern</b>\n"
             "   📍 Ausländerbehörde München\n"
-            "   📅 Подписка от: 2026-10-01\n\n"
+            "   📅 Подписка оформлена: 2026-10-01\n\n"
             "• <b>Reisepass beantragen für Erwachsene über 24 Jahre</b>\n"
             "   📍 Неизвестное отделение\n"
-            "   📅 Подписка от: 2026-10-01\n\n"
+            "   📅 Подписка оформлена: 2026-10-01\n\n"
             "<b>Всего:</b> 2 подписки"
         )
         assert buttons(sent.reply_markup) == [
             ("🗑 Aufenthaltstitel verlängern", "unsub:1"),
             ("🗑 Reisepass beantragen für Er...", "unsub:2"),
-            ("📋 Подписаться ещё", "subscribe"),
+            ("📋 Подписаться ещё", "categories"),
             ("🗑 Отписаться от всех", "unsub_all"),
             ("🏠 Главное меню", "main_menu"),
         ]
@@ -406,3 +411,33 @@ class TestMyServices:
         add_subscriptions(db, (1, 10))
         sent = await reply_of(myservices_command)
         assert sent.text.endswith("<b>Всего:</b> 1 подписка")
+
+    @pytest.mark.parametrize(
+        ("lang", "office"), [("en", "Office 99"), ("ru", "Отделение 99")]
+    )
+    async def test_office_missing_from_city_catalog(self, db, lang, office):
+        add_user(db, lang)
+        add_subscriptions(db, (1, 99))
+        sent = await reply_of(myservices_command)
+        assert f"   📍 {office}\n" in sent.text
+
+
+class TestStats:
+    @pytest.mark.parametrize(
+        ("lang", "text"),
+        [
+            ("en", "⛔️ This command is only available to the bot administrator."),
+            ("ru", "⛔️ Эта команда доступна только администратору бота."),
+        ],
+    )
+    async def test_non_admin_is_refused_in_own_language(
+        self, db, monkeypatch, caplog, lang, text
+    ):
+        monkeypatch.setattr(get_config(), "admin_telegram_id", USER_ID + 1)
+        add_user(db, lang)
+        with caplog.at_level(logging.WARNING, logger="src.commands.stats"):
+            sent = await reply_of(stats_command)
+        assert sent.text == text
+        assert [r.getMessage() for r in caplog.records] == [
+            f"User {USER_ID} attempted to access /stats command"
+        ]

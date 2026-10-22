@@ -3,11 +3,13 @@ Database initialization and session management
 Provides connection pooling and session lifecycle management
 """
 
-from sqlmodel import SQLModel, create_engine, Session
-from contextlib import contextmanager
-from typing import Generator
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 
+from sqlmodel import Session, SQLModel, create_engine
+
+import src.db_models  # noqa: F401  (registers tables on SQLModel.metadata)
 from src.config import get_config
 
 logger = logging.getLogger(__name__)

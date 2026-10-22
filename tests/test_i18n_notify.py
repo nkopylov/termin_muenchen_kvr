@@ -190,7 +190,7 @@ class TestNotifyUsersOfAppointment:
             f"<b>{SERVICE_NAME}</b>\n\n"
             f"Свободные записи:\n{ru_dates}\n\n"
             f"🔗 <a href='{BOOKING_URL}'>Записаться сейчас!</a>\n\n"
-            "⏳ Загружаем свободное время..."
+            "⏳ Загружаю свободное время..."
         )
 
     async def test_final_message_and_buttons_per_language(self, db, events, slots_api):
