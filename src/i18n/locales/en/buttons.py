@@ -9,23 +9,23 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "buttons.btn_status": "ℹ️ Subscription Status",
     "buttons.not_registered": "❌ You are not registered.\n\nUse /start to register.",
     "buttons.seconds_ago": {
-        "one": "{count} seconds ago",
+        "one": "{count} second ago",
         "other": "{count} seconds ago",
     },
     "buttons.minutes_ago": {
-        "one": "{count} minutes ago",
+        "one": "{count} minute ago",
         "other": "{count} minutes ago",
     },
     "buttons.hours_ago": {
-        "one": "{count} hours ago",
+        "one": "{count} hour ago",
         "other": "{count} hours ago",
     },
     "buttons.next_check_seconds": {
-        "one": "~{count} seconds",
+        "one": "~{count} second",
         "other": "~{count} seconds",
     },
     "buttons.next_check_minutes": {
-        "one": "~{count} minutes",
+        "one": "~{count} minute",
         "other": "~{count} minutes",
     },
     "buttons.never": "Never",
@@ -33,7 +33,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "buttons.today": "today",
     "buttons.yesterday": "yesterday",
     "buttons.days_ago": {
-        "one": "{count} days ago",
+        "one": "{count} day ago",
         "other": "{count} days ago",
     },
     "buttons.recently": "recently",
@@ -65,7 +65,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
     "buttons.preset_3_months": "📅 Next 3 months ({today} to {end_date})",
     "buttons.preset_6_months": "📅 Next 6 months ({today} to {end_date})",
     "buttons.date_range_set": {
-        "one": "✅ Date range set: next {count} days",
+        "one": "✅ Date range set: next {count} day",
         "other": "✅ Date range set: next {count} days",
     },
     "buttons.no_services_in_category": "❌ No services found in {category} category.",

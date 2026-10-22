@@ -308,7 +308,7 @@ class TestStatusScreen:
             "📅 Date Range: 2025-10-01 to 2025-10-31\n"
             "🌐 Language: 🇬🇧 English\n\n"
             "🔍 Last checked: 10 seconds ago\n"
-            "⏱ Next check in: ~1 minutes\n"
+            "⏱ Next check in: ~1 minute\n"
             "⚙️ Check interval: 120 seconds"
             "\n🎯 Appointments found: 0"
         )
@@ -360,8 +360,8 @@ class TestStatusTiming:
     @pytest.mark.parametrize(
         ("ago", "interval", "last", "next_"),
         [
-            (timedelta(seconds=10), 120, "10 seconds ago", "~1 minutes"),
-            (timedelta(seconds=118), 120, "1 minutes ago", "~1 seconds"),
+            (timedelta(seconds=10), 120, "10 seconds ago", "~1 minute"),
+            (timedelta(seconds=118), 120, "1 minute ago", "~1 second"),
             (timedelta(hours=2), 120, "2 hours ago", "~0 seconds"),
         ],
     )

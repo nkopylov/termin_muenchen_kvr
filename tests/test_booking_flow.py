@@ -3,16 +3,17 @@ Tests for booking flow state machine
 Tests the complex multi-step booking conversation flow
 """
 
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
 from src.commands.booking import (
     create_booking_session,
-    update_booking_session,
     delete_booking_session,
     get_booking_session,
+    update_booking_session,
 )
-
 
 
 @pytest.fixture(autouse=True)
@@ -138,10 +139,10 @@ class TestBookingStateTransitions:
     def test_state_progression_order(self):
         """Test the expected order of booking states"""
         from src.commands.booking import (
-            SELECTING_TIME,
-            ASKING_NAME,
             ASKING_EMAIL,
+            ASKING_NAME,
             CONFIRMING,
+            SELECTING_TIME,
         )
 
         # Verify state constants are in correct order
@@ -158,8 +159,8 @@ class TestBookingStateTransitions:
         self, mock_update, mock_get_session
     ):
         """Test transition from SELECTING_TIME to ASKING_NAME"""
-        from src.db_models import BookingSession
         from src.commands.booking import time_selected
+        from src.db_models import BookingSession
 
         # Mock booking session
         mock_session = BookingSession(

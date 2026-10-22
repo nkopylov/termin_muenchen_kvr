@@ -13,7 +13,7 @@ from telegram import (
 from telegram.error import TelegramError
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
-from src.commands.start import build_welcome, register_user
+from src.commands.start import build_welcome
 from src.handlers.language_picker import build_language_picker, send_language_picker
 from src.i18n import DEFAULT_LANGUAGE, is_language_chosen, t
 from src.i18n.user_language import (
@@ -36,7 +36,9 @@ BOT_COMMANDS = (
     "language",
     "stop",
 )
-LANGUAGE_FLOW_COMMANDS = ("start", "language")
+GATE_FREE_COMMANDS = ("start", "language", "stop")
+GATE_FREE_CALLBACK_PREFIXES = ("lang:", "book_", "time_")
+GATE_FREE_CALLBACKS = ("confirm_booking", "cancel_booking")
 
 
 def bot_commands(lang: str) -> list[BotCommand]:
@@ -77,7 +79,8 @@ async def language_choice_callback(
     user = update.effective_user
     previous = get_stored_language(user.id)
     if previous is None:
-        await register_user(user.id, user.username or user.first_name)
+        await query.edit_message_text(t("menu.not_registered", lang))
+        return
 
     set_user_language(user.id, lang, context)
     try:
@@ -104,23 +107,28 @@ async def language_choice_callback(
     await query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
 
 
-def _is_language_flow(update: Update) -> bool:
+def _passes_gate(update: Update) -> bool:
+    # Booking buttons and typed booking answers are time-critical; /stop must always work
     query = update.callback_query
     if query is not None:
         data = query.data or ""
-        return data == "language" or data.startswith("lang:")
+        return (
+            data == "language"
+            or data.startswith(GATE_FREE_CALLBACK_PREFIXES)
+            or data in GATE_FREE_CALLBACKS
+        )
 
     message = update.message
     if message is None or not message.text or not message.text.startswith("/"):
-        return False
+        return True
     command = message.text.split()[0][1:].split("@")[0].lower()
-    return command in LANGUAGE_FLOW_COMMANDS
+    return command in GATE_FREE_COMMANDS
 
 
 async def language_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ask registered users without a language to choose one before anything else"""
     user = update.effective_user
-    if user is None or CACHE_KEY in context.user_data or _is_language_flow(update):
+    if user is None or CACHE_KEY in context.user_data or _passes_gate(update):
         return
 
     stored = get_stored_language(user.id)

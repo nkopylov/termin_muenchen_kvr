@@ -17,7 +17,7 @@ MESSAGES: dict[str, str | dict[str, str]] = {
         "⚡ Act fast - Appointments fill up quickly!"
     ),
     "notify.more_days": {
-        "one": "... and {count} more days",
+        "one": "... and {count} more day",
         "other": "... and {count} more days",
     },
     "notify.unknown_date": "Unknown date",

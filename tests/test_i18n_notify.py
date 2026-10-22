@@ -58,9 +58,9 @@ class TestFormatAvailableAppointments:
             "📅 2026-12-05\n... and 2 more days"
         )
 
-    def test_english_single_remaining_day_keeps_wording(self):
+    def test_english_single_remaining_day_is_singular(self):
         data = {"availableDays": days(DATES[:6])}
-        assert format_available_appointments(data, "en").endswith("... and 1 more days")
+        assert format_available_appointments(data, "en").endswith("... and 1 more day")
 
     @pytest.mark.parametrize(
         ("total", "tail"),

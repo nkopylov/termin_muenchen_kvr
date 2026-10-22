@@ -229,3 +229,26 @@ class TestCatalogIntegrity:
             if not re.fullmatch(r"[a-z_]+\.[a-z0-9_.]+", key)
         ]
         assert bad == []
+
+
+@pytest.mark.parametrize(
+    "key, one, other",
+    [
+        ("notify.more_days", "... and 1 more day", "... and 2 more days"),
+        ("buttons.seconds_ago", "1 second ago", "2 seconds ago"),
+        ("buttons.minutes_ago", "1 minute ago", "2 minutes ago"),
+        ("buttons.hours_ago", "1 hour ago", "2 hours ago"),
+        ("buttons.next_check_seconds", "~1 second", "~2 seconds"),
+        ("buttons.next_check_minutes", "~1 minute", "~2 minutes"),
+        ("status.seconds_ago", "1 second ago", "2 seconds ago"),
+        ("status.minutes_ago", "1 minute ago", "2 minutes ago"),
+        ("status.hours_ago", "1 hour ago", "2 hours ago"),
+        ("status.next_in_seconds", "~1 second", "~2 seconds"),
+        ("status.next_in_minutes", "~1 minute", "~2 minutes"),
+        ("status.found_days_ago", "1 day ago", "2 days ago"),
+        ("status.interval_seconds", "1 second", "2 seconds"),
+    ],
+)
+def test_english_singular_and_plural(key, one, other):
+    assert t(key, "en", count=1) == one
+    assert t(key, "en", count=2) == other

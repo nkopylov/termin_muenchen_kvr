@@ -4,23 +4,12 @@ Minimal bot setup that wires together all commands and handlers.
 """
 
 import logging
+
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, TypeHandler
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
-from src.config import get_config
-from src.database import init_database
-
-# Import commands
-from src.commands.start import start_command
-from src.commands.stop import stop_command
-from src.commands.menu import menu_command
-from src.commands.subscribe import subscribe_command
-from src.commands.myservices import myservices_command
-from src.commands.setdates import setdates_command
-from src.commands.status import status_command
-from src.commands.stats import stats_command
-from src.commands.help import help_command
 from src.commands.booking import booking_conversation
+from src.commands.help import help_command
 from src.commands.language import (
     language_choice_callback,
     language_command,
@@ -28,13 +17,25 @@ from src.commands.language import (
     language_menu_callback,
     set_default_commands,
 )
+from src.commands.menu import menu_command
+from src.commands.myservices import myservices_command
+from src.commands.setdates import setdates_command
+
+# Import commands
+from src.commands.start import start_command
+from src.commands.stats import stats_command
+from src.commands.status import status_command
+from src.commands.stop import stop_command
+from src.commands.subscribe import subscribe_command
+from src.config import get_config
+from src.database import init_database
 
 # Import handlers
 from src.handlers.buttons import button_callback
+from src.services.analytics_service import cleanup_analytics
 
 # Import services
 from src.services.appointment_checker import check_and_notify, set_bot_start_time
-from src.services.analytics_service import cleanup_analytics
 
 # Configure logging
 logging.basicConfig(

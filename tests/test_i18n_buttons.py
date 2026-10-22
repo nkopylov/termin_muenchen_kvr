@@ -803,7 +803,7 @@ class TestStatus:
         ("lang", "interval", "expected"),
         [
             ("en", 120, "⚙️ Check interval: 120 seconds\n"),
-            ("en", 1, "⚙️ Check interval: 1 seconds\n"),
+            ("en", 1, "⚙️ Check interval: 1 second\n"),
             ("ru", 120, "⚙️ Интервал проверки: 120 секунд\n"),
             ("ru", 21, "⚙️ Интервал проверки: 21 секунда\n"),
             ("ru", 22, "⚙️ Интервал проверки: 22 секунды\n"),
@@ -949,7 +949,7 @@ class TestCatalogTexts:
             ("buttons.next_check_minutes", "~{} minutes"),
         ],
     )
-    @pytest.mark.parametrize("count", [1, 7])
+    @pytest.mark.parametrize("count", [2, 7])
     def test_english_time_unchanged(self, key, text, count):
         assert t(key, "en", count=count) == text.format(count)
 

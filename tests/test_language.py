@@ -334,14 +334,14 @@ class TestLanguageChoice:
         assert stored_language(db) == "en"
         assert update.callback_query.edits[-1].text == t("language.changed", "en")
 
-    async def test_unknown_user_is_registered_with_choice(self, db, events):
-        update = make_update(data="lang:en")
+    async def test_unknown_user_is_asked_to_start_and_not_registered(self, db, events):
+        update = make_update(data="lang:ru")
 
         await language_choice_callback(update, make_context())
 
-        assert stored_language(db) == "en"
-        assert update.callback_query.edits[-1].text == t("start.welcome", "en")
-        assert any(name == "user_registered" for name, _ in events)
+        assert stored_language(db) is None
+        assert update.callback_query.edits[-1].text == t("menu.not_registered", "ru")
+        assert not any(name == "user_registered" for name, _ in events)
 
     async def test_unsupported_language_is_ignored(self, db, events):
         add_user(db, "")
@@ -454,9 +454,16 @@ class TestGate:
             {"text": "/language"},
             {"data": "lang:ru"},
             {"data": "language"},
+            {"text": "/stop"},
+            {"text": "Ivan Petrov"},
+            {"text": "ivan@example.com"},
+            {"data": "book_2026-10-25_102101_1064305"},
+            {"data": "time_1796292600"},
+            {"data": "confirm_booking"},
+            {"data": "cancel_booking"},
         ],
     )
-    async def test_unset_user_can_reach_language_flow(self, db, kwargs):
+    async def test_unset_user_passes_language_stop_and_booking(self, db, kwargs):
         add_user(db, "")
         context = make_context()
 
