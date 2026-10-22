@@ -234,19 +234,9 @@ class TestCatalogIntegrity:
 @pytest.mark.parametrize(
     "key, one, other",
     [
-        ("notify.more_days", "... and 1 more day", "... and 2 more days"),
-        ("buttons.seconds_ago", "1 second ago", "2 seconds ago"),
-        ("buttons.minutes_ago", "1 minute ago", "2 minutes ago"),
-        ("buttons.hours_ago", "1 hour ago", "2 hours ago"),
-        ("buttons.next_check_seconds", "~1 second", "~2 seconds"),
-        ("buttons.next_check_minutes", "~1 minute", "~2 minutes"),
-        ("status.seconds_ago", "1 second ago", "2 seconds ago"),
-        ("status.minutes_ago", "1 minute ago", "2 minutes ago"),
-        ("status.hours_ago", "1 hour ago", "2 hours ago"),
-        ("status.next_in_seconds", "~1 second", "~2 seconds"),
-        ("status.next_in_minutes", "~1 minute", "~2 minutes"),
-        ("status.found_days_ago", "1 day ago", "2 days ago"),
-        ("status.interval_seconds", "1 second", "2 seconds"),
+        ("watch.when_within", "within 1 day", "within 2 days"),
+        ("watch.ago_hours", "1 hour ago", "2 hours ago"),
+        ("watch.ago_days", "1 day ago", "2 days ago"),
     ],
 )
 def test_english_singular_and_plural(key, one, other):

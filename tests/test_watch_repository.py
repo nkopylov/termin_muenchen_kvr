@@ -158,6 +158,16 @@ class TestQueries:
         repo.set_status(ended.id, "ended", end_reason="stopped")
         assert [r.id for r in repo.list_active()] == [active.id]
 
+    def test_list_paused_of_every_user(self, repo):
+        create(repo, 1)
+        mine = create(repo, 2)
+        theirs = create(repo, 2, user_id=OTHER)
+        ended = create(repo, 3)
+        repo.set_status(mine.id, "paused", pause_reason="user")
+        repo.set_status(theirs.id, "paused", pause_reason="blocked")
+        repo.set_status(ended.id, "ended", end_reason="stopped")
+        assert [r.id for r in repo.list_paused()] == [mine.id, theirs.id]
+
     def test_bad_row_is_skipped_and_logged(self, repo, db_session, caplog):
         good = create(repo, 1)
         bad = create(repo, 2)
@@ -474,6 +484,17 @@ class TestPendingRetires:
         assert repo.discard(USER, 6) is False
         repo.delete(first.id)
         assert repo.due(NOW + timedelta(days=1)) == []
+
+    def test_list_for_user_ignores_not_before(self, db_session):
+        repo = PendingRetireRepository(db_session)
+        repo.add(USER, USER, 5, "a", NOW + timedelta(days=1))
+        repo.add(OTHER, OTHER, 6, "b", NOW)
+        repo.add(USER, USER, 7, "c", NOW)
+        assert [(i.message_id, i.text) for i in repo.list_for_user(USER)] == [
+            (5, "a"),
+            (7, "c"),
+        ]
+        assert repo.list_for_user(99) == []
 
 
 class TestUserAdditions:

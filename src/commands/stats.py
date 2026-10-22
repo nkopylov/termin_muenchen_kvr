@@ -1,18 +1,17 @@
-"""
-/stats command - Show bot statistics (admin only)
-"""
+# ABOUTME: /stats command - Show bot statistics (admin only).
+# ABOUTME: Checker counters from appointment_checker plus user and watch counts from the DB.
 
 import logging
 from datetime import datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.config import get_config
 from src.database import get_session
 from src.i18n import t
 from src.i18n.user_language import get_user_language
-from src.repositories import SubscriptionRepository, UserRepository
+from src.repositories import UserRepository, WatchRepository
 from src.services.appointment_checker import get_stats
 
 logger = logging.getLogger(__name__)
@@ -40,12 +39,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         uptime = f"{hours}h {minutes}m"
 
     with get_session() as session:
-        user_repo = UserRepository(session)
-        sub_repo = SubscriptionRepository(session)
-
-        total_users = len(user_repo.get_all_users())
-        service_subs = sub_repo.get_all_service_subscriptions()
-        total_services = len(service_subs)
+        total_users = len(UserRepository(session).get_all_users())
+        watches = WatchRepository(session).counts()
 
     success_rate = 0
     if stats["total_checks"] > 0:
@@ -55,7 +50,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "📈 <b>Bot Statistics</b>\n\n"
         f"⏱ Uptime: {uptime}\n"
         f"👥 Users: {total_users}\n"
-        f"📋 Unique Service Subscriptions: {total_services}\n\n"
+        f"👀 Watches: {watches['active']} active, {watches['paused']} paused, "
+        f"{watches['ended']} ended\n"
+        f"🙋 Users with open watches: {watches['users_with_open']}\n\n"
         f"🔍 Total checks: {stats['total_checks']}\n"
         f"✅ Successful: {stats['successful_checks']}\n"
         f"❌ Failed: {stats['failed_checks']}\n"
@@ -72,9 +69,4 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"\n✅ Last success: {stats['last_success_time'].strftime('%H:%M:%S')}"
         )
 
-    keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        message, reply_markup=reply_markup, parse_mode="HTML"
-    )
+    await update.message.reply_text(message, parse_mode="HTML")

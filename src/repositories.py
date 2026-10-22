@@ -77,15 +77,6 @@ class UserRepository:
             user = self.create_user(user_id, username, language)
         return user
 
-    def set_date_range(
-        self, user_id: int, start_date: str | None, end_date: str | None
-    ) -> None:
-        """Set user's date range for appointments"""
-        user = self.get_or_create_user(user_id)
-        user.start_date = start_date
-        user.end_date = end_date
-        self.session.commit()
-
     def set_language(self, user_id: int, language: str) -> bool:
         """Set user's interface language; returns False if the user does not exist"""
         user = self.get_user(user_id)
@@ -99,15 +90,6 @@ class UserRepository:
         """Get all users"""
         statement = select(User)
         return list(self.session.exec(statement))
-
-    def delete_user(self, user_id: int) -> bool:
-        """Delete user and all their subscriptions"""
-        user = self.get_user(user_id)
-        if user:
-            self.session.delete(user)
-            self.session.commit()
-            return True
-        return False
 
     def get_booking_contact(self, user_id: int) -> tuple[str, str] | None:
         """Saved (name, email) for booking, or None"""
@@ -164,91 +146,6 @@ class SubscriptionRepository:
 
     def __init__(self, session: Session):
         self.session = session
-
-    def add_subscription(
-        self, user_id: int, service_id: int, office_id: int
-    ) -> ServiceSubscription:
-        """Add a service subscription for a user"""
-        # Check if already exists
-        statement = select(ServiceSubscription).where(
-            ServiceSubscription.user_id == user_id,
-            ServiceSubscription.service_id == service_id,
-            ServiceSubscription.office_id == office_id,
-        )
-        existing = self.session.exec(statement).first()
-
-        if existing:
-            return existing
-
-        subscription = ServiceSubscription(
-            user_id=user_id, service_id=service_id, office_id=office_id
-        )
-        self.session.add(subscription)
-        self.session.commit()
-        self.session.refresh(subscription)
-        return subscription
-
-    def remove_subscription(self, user_id: int, service_id: int) -> bool:
-        """Remove a user's subscription to a service"""
-        statement = delete(ServiceSubscription).where(
-            ServiceSubscription.user_id == user_id,
-            ServiceSubscription.service_id == service_id,
-        )
-        result = self.session.exec(statement)
-        self.session.commit()
-        return result.rowcount > 0
-
-    def get_user_subscriptions(self, user_id: int) -> list[dict]:
-        """Get all subscriptions for a user"""
-        statement = select(ServiceSubscription).where(
-            ServiceSubscription.user_id == user_id
-        )
-        subscriptions = self.session.exec(statement).all()
-
-        return [
-            {
-                "service_id": sub.service_id,
-                "office_id": sub.office_id,
-                "subscribed_at": sub.subscribed_at.isoformat(),
-            }
-            for sub in subscriptions
-        ]
-
-    def get_all_service_subscriptions(self) -> dict[str, list[int]]:
-        """
-        Get all unique service/office combinations and their subscribers
-
-        Returns:
-            Dict mapping "service_id_office_id" to list of user_ids
-        """
-        statement = select(ServiceSubscription)
-        all_subs = self.session.exec(statement).all()
-
-        # Group by service_id and office_id
-        grouped: dict[str, list[int]] = {}
-        for sub in all_subs:
-            key = f"{sub.service_id}_{sub.office_id}"
-            if key not in grouped:
-                grouped[key] = []
-            grouped[key].append(sub.user_id)
-
-        return grouped
-
-    def has_subscription(self, user_id: int, service_id: int, office_id: int) -> bool:
-        """Check if user has a specific subscription"""
-        statement = select(ServiceSubscription).where(
-            ServiceSubscription.user_id == user_id,
-            ServiceSubscription.service_id == service_id,
-            ServiceSubscription.office_id == office_id,
-        )
-        return self.session.exec(statement).first() is not None
-
-    def get_subscription_count(self, user_id: int) -> int:
-        """Get count of user's subscriptions"""
-        statement = select(ServiceSubscription).where(
-            ServiceSubscription.user_id == user_id
-        )
-        return len(list(self.session.exec(statement)))
 
     def delete_all_user_subscriptions(self, user_id: int) -> int:
         """Delete all subscriptions for a user"""
@@ -431,22 +328,6 @@ class BookingSessionRepository:
             self.session.delete(row)
         self.session.commit()
         return records
-
-    def cleanup_expired_sessions(self) -> int:
-        """Delete all expired sessions"""
-        statement = delete(BookingSession).where(
-            BookingSession.expires_at < datetime.utcnow()
-        )
-        result = self.session.exec(statement)
-        self.session.commit()
-        return result.rowcount
-
-    def get_all_active_sessions(self) -> list[BookingSession]:
-        """Get all active (non-expired) sessions"""
-        statement = select(BookingSession).where(
-            BookingSession.expires_at > datetime.utcnow()
-        )
-        return list(self.session.exec(statement))
 
 
 @dataclass(frozen=True)
@@ -636,6 +517,10 @@ class WatchRepository:
 
     def list_active(self) -> list[WatchRecord]:
         statement = select(Watch).where(Watch.status == "active").order_by(Watch.id)
+        return self._records(statement)
+
+    def list_paused(self) -> list[WatchRecord]:
+        statement = select(Watch).where(Watch.status == "paused").order_by(Watch.id)
         return self._records(statement)
 
     def counts(self) -> dict[str, int]:
@@ -944,6 +829,15 @@ class PendingRetireRepository:
         statement = (
             select(PendingRetire)
             .where(PendingRetire.not_before <= now)
+            .order_by(PendingRetire.id)
+        )
+        return [self._record(r) for r in self.session.exec(statement)]
+
+    def list_for_user(self, user_id: int) -> list[PendingRetireRecord]:
+        """Every queued message of the user, due or not"""
+        statement = (
+            select(PendingRetire)
+            .where(PendingRetire.user_id == user_id)
             .order_by(PendingRetire.id)
         )
         return [self._record(r) for r in self.session.exec(statement)]

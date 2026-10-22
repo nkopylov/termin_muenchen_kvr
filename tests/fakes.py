@@ -33,6 +33,7 @@ class FakeBot:
     """Records Bot API calls; send/edit return real Message objects with incrementing ids."""
 
     defaults = None
+    id = 1
     username = "termin_test_bot"
 
     def __init__(self, first_message_id: int = 1000) -> None:
@@ -63,6 +64,14 @@ class FakeBot:
     @property
     def edits(self) -> list[Call]:
         return self.calls_of("edit_message_text")
+
+    # lifecycle used by a real Application
+
+    async def initialize(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
+        pass
 
     # Bot API surface
 

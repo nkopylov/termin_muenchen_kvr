@@ -1,108 +1,58 @@
-# ABOUTME: Tests that every booking conversation screen renders in the user's language.
-# ABOUTME: English output must match the original texts byte for byte; Russian is checked exactly.
+# ABOUTME: Tests that every booking screen renders in the user's language, checked text for text.
+# ABOUTME: Drives the real handlers with a FakeBot, an in-memory DB and a faked city API.
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from types import SimpleNamespace
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 from sqlmodel import Session
-from telegram.ext import ConversationHandler
+from telegram.ext import ApplicationHandlerStop
 
-from src import database
 from src.commands import booking
-from src.commands.booking import (
-    ASKING_EMAIL,
-    ASKING_NAME,
-    CONFIRMING,
-    SELECTING_TIME,
-    cancel_booking_button,
-    cancel_booking_conversation,
-    confirm_booking,
-    create_booking_session,
-    email_received,
-    get_booking_session,
-    name_received,
-    start_booking,
-    time_selected,
-    update_booking_session,
-)
-from src.repositories import UserRepository
+from src.repositories import BookingSessionRepository, UserRepository, WatchRepository
+from src.watches.slots import SlotTime
+from src.watches.when import PRESETS
+from tests.conftest import NOW
+from tests.fakes import FakeBot, FakeContext, make_callback_update, make_text_update
+
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("catalog", "clock", "today")]
 
 USER_ID = 5151
-OFFICE_ID = 200
-SERVICE_ID = 100
-DATE = "2025-01-15"
+MSG = 300
+SERVICE_ID = 1063475
+OFFICE_ID = 102526
 BERLIN = ZoneInfo("Europe/Berlin")
-TS = int(datetime(2025, 1, 15, 10, 30, tzinfo=BERLIN).timestamp())
-TS_SINGLE_DIGIT_DAY = int(datetime(2025, 3, 5, 9, 5, tzinfo=BERLIN).timestamp())
+TS = int(datetime(2026, 10, 29, 9, 30, tzinfo=BERLIN).timestamp())
+TS_SINGLE_DIGIT_DAY = int(datetime(2026, 11, 5, 9, 5, tzinfo=BERLIN).timestamp())
 NAME = "Ivan Petrov"
 EMAIL = "ivan@example.com"
 LANGS = ["en", "ru"]
 
-
-@dataclass
-class Sent:
-    text: str
-    reply_markup: object = None
-    parse_mode: str | None = None
-
-
-@dataclass
-class FakeMessage:
-    text: str | None = None
-    replies: list[Sent] = field(default_factory=list)
-
-    async def reply_text(self, text, reply_markup=None, parse_mode=None, **kwargs):
-        self.replies.append(Sent(text, reply_markup, parse_mode))
+CANCEL = {"en": "❌ Cancel", "ru": "❌ Отмена"}
+CANCEL_BOOKING = {"en": "❌ Cancel Booking", "ru": "❌ Отменить запись"}
+CONFIRM = {"en": "✅ Confirm Booking", "ru": "✅ Подтвердить запись"}
+MY_WATCHES = {"en": "👀 My watches", "ru": "👀 Мои поиски"}
+LONG_TIME = {
+    "en": "09:30 on Thursday, October 29, 2026",
+    "ru": "четверг, 29 октября 2026, 09:30",
+}
 
 
-@dataclass
-class FakeQuery:
-    data: str
-    answers: list[tuple] = field(default_factory=list)
-    edits: list[Sent] = field(default_factory=list)
-
-    async def answer(self, *args, **kwargs):
-        self.answers.append(args)
-
-    async def edit_message_text(
-        self, text, reply_markup=None, parse_mode=None, **kwargs
-    ):
-        self.edits.append(Sent(text, reply_markup, parse_mode))
+@pytest.fixture
+def bot():
+    return FakeBot()
 
 
-def make_update(*, text=None, data=None):
-    return SimpleNamespace(
-        effective_user=SimpleNamespace(id=USER_ID),
-        message=FakeMessage(text=text) if text is not None else None,
-        callback_query=FakeQuery(data=data) if data is not None else None,
-    )
-
-
-def make_context(captcha_token="tok"):
-    bot_data = {"captcha_token": captcha_token} if captcha_token else {}
-    return SimpleNamespace(user_data={}, bot_data=bot_data)
-
-
-def buttons(markup) -> list[tuple[str, str]]:
-    return [(b.text, b.callback_data) for row in markup.inline_keyboard for b in row]
+@pytest.fixture
+def context(bot):
+    return FakeContext(bot)
 
 
 @pytest.fixture(autouse=True)
-def db(monkeypatch, db_engine):
-    monkeypatch.setattr(database, "_engine", db_engine)
-    return db_engine
-
-
-@pytest.fixture(autouse=True)
-def boundaries(monkeypatch):
-    async def record(event_name, user_id=None, **properties):
-        return None
-
-    monkeypatch.setattr(booking, "track_event", record)
-    monkeypatch.setattr(booking, "get_service_info", lambda _id: {"name": "Svc"})
+def boundaries(monkeypatch, events):
+    events.patch(booking)
+    monkeypatch.setattr(booking, "increment_bookings_started", lambda: None)
+    monkeypatch.setattr(booking, "increment_bookings_completed", lambda: None)
 
 
 def add_user(db, lang):
@@ -112,142 +62,176 @@ def add_user(db, lang):
         )
 
 
-def open_session(timestamp=None, name=None, email=None, state="SELECTING_TIME"):
-    create_booking_session(
-        user_id=USER_ID,
-        service_id=SERVICE_ID,
-        office_id=OFFICE_ID,
-        date=DATE,
-        captcha_token="tok",
-        state=state,
-    )
-    update_booking_session(USER_ID, timestamp=timestamp, name=name, email=email)
+def add_watch(db, live=True):
+    with Session(db) as session:
+        watches = WatchRepository(session)
+        rec, _ = watches.create_or_update(USER_ID, SERVICE_ID, None, PRESETS["asap"])
+        if live:
+            watches.set_live_alert(
+                rec.id, USER_ID, MSG, "slots", frozenset(), frozenset(), "h"
+            )
+        return rec.id
 
 
-CANCEL = {"en": "❌ Cancel", "ru": "❌ Отмена"}
-CANCEL_BOOKING = {"en": "❌ Cancel Booking", "ru": "❌ Отменить запись"}
-CONFIRM = {"en": "✅ Confirm Booking", "ru": "✅ Подтвердить запись"}
-MAIN_MENU = {"en": "🏠 Main Menu", "ru": "🏠 Главное меню"}
-CANCELLED = {"en": "❌ Booking cancelled.", "ru": "❌ Запись отменена."}
-SESSION_EXPIRED = {
-    "en": "❌ Session expired. Please start again.",
-    "ru": "❌ Время на оформление записи истекло. Пожалуйста, начните заново.",
-}
+def open_session(db, state, timestamp=TS, name=None, email=None, watch_id=None):
+    with Session(db) as session:
+        repo = BookingSessionRepository(session)
+        repo.create_session(
+            user_id=USER_ID,
+            state=state,
+            service_id=SERVICE_ID,
+            office_id=OFFICE_ID,
+            date="2026-10-29",
+            captcha_token="",
+            expires_at=NOW + timedelta(minutes=15),
+            watch_id=watch_id,
+            message_id=MSG,
+        )
+        repo.update_session(USER_ID, timestamp=timestamp, name=name, email=email)
 
 
-@pytest.mark.asyncio
-class TestStartBooking:
+async def press(handler, context, data):
+    update = make_callback_update(data, USER_ID, MSG, bot=context.bot)
+    try:
+        await handler(update, context)
+    except ApplicationHandlerStop:
+        pass
+
+
+async def type_text(handler, context, text):
+    update = make_text_update(text, USER_ID, bot=context.bot, message_id=77)
+    try:
+        await handler(update, context)
+    except ApplicationHandlerStop:
+        pass
+
+
+def buttons(markup) -> list[tuple[str, str]]:
+    return [
+        (b.text, b.callback_data or b.url)
+        for row in markup.inline_keyboard
+        for b in row
+    ]
+
+
+def toasts(bot):
+    return [c.text for c in bot.calls_of("answer_callback_query") if c.text]
+
+
+class TestBookTap:
     @pytest.mark.parametrize(
         ("lang", "fetching", "prompt"),
         [
             (
                 "en",
-                "📅 Selected date: 2025-01-15\n\nFetching available time slots...",
-                "📅 Available time slots for 2025-01-15:\n\nPlease select a time:",
+                "📅 Selected date: Thu 29.10\n\nFetching available time slots...",
+                "📅 Available time slots for Thu 29.10:\n\nPlease select a time:",
             ),
             (
                 "ru",
-                "📅 Выбранная дата: 2025-01-15\n\nЗагружаю свободное время...",
-                "📅 Свободное время на 2025-01-15:\n\nВыберите время:",
+                "📅 Выбранная дата: Чт 29.10\n\nЗагружаю свободное время...",
+                "📅 Свободное время на Чт 29.10:\n\nВыберите время:",
             ),
         ],
     )
-    async def test_shows_time_slots(self, db, monkeypatch, lang, fetching, prompt):
+    async def test_shows_times(
+        self, db, context, bot, fake_availability, lang, fetching, prompt
+    ):
         add_user(db, lang)
-        monkeypatch.setattr(
-            booking,
-            "get_available_slots",
-            lambda *a: {"offices": [{"officeId": OFFICE_ID, "appointments": [TS]}]},
-        )
-        update = make_update(data=f"book_{DATE}_{OFFICE_ID}_{SERVICE_ID}")
+        watch_id = add_watch(db)
+        fake_availability.day_results = [(SlotTime(TS, OFFICE_ID),)]
 
-        state = await start_booking(update, make_context())
+        await press(booking.book_day, context, f"b1:{watch_id}:20261029")
+        await context.drain()
 
-        assert state == SELECTING_TIME
-        edits = update.callback_query.edits
-        assert [e.text for e in edits] == [fetching, prompt]
-        assert buttons(edits[-1].reply_markup) == [
-            ("🕐 10:30", f"time_{TS}"),
-            (CANCEL[lang], "cancel_booking"),
+        assert [e.text for e in bot.edits] == [fetching, prompt]
+        assert buttons(bot.edits[-1].reply_markup) == [
+            ("09:30 · Forstenrieder Allee", f"b1:t:{OFFICE_ID}:{TS}"),
+            (CANCEL[lang], "b1:x"),
         ]
 
     @pytest.mark.parametrize(
-        ("lang", "expected"),
+        ("lang", "result", "expected"),
         [
             (
                 "en",
+                (),
                 (
-                    "❌ Error: Captcha token expired. Please try again from the "
-                    "appointment notification."
+                    "😕 No free times left on Thu 29.10.\n\n"
+                    "I'll keep watching and send you the updated free days."
                 ),
             ),
             (
                 "ru",
+                (),
                 (
-                    "❌ Ошибка: срок действия капчи истёк. Пожалуйста, начните "
-                    "запись заново из уведомления о свободной записи."
+                    "😕 На Чт 29.10 свободного времени больше нет.\n\n"
+                    "Я продолжаю искать и пришлю обновлённый список свободных дней."
                 ),
             ),
-        ],
-    )
-    async def test_captcha_expired(self, db, lang, expected):
-        add_user(db, lang)
-        update = make_update(data=f"book_{DATE}_{OFFICE_ID}_{SERVICE_ID}")
-
-        state = await start_booking(update, make_context(captcha_token=None))
-
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == expected
-
-    @pytest.mark.parametrize(
-        ("lang", "expected"),
-        [
             (
                 "en",
+                None,
                 (
-                    "❌ No available time slots found for 2025-01-15.\n"
-                    "They may have been booked already. Please try another date."
+                    "⚠️ I couldn't load the times for Thu 29.10 right now.\n\n"
+                    "I'll keep watching and send you the updated free days."
                 ),
             ),
             (
                 "ru",
+                None,
                 (
-                    "❌ На 2025-01-15 свободного времени не найдено.\n"
-                    "Возможно, его уже заняли. Пожалуйста, выберите другую дату."
+                    "⚠️ Сейчас не удалось загрузить время на Чт 29.10.\n\n"
+                    "Я продолжаю искать и пришлю обновлённый список свободных дней."
                 ),
             ),
         ],
     )
-    async def test_no_slots_found(self, db, monkeypatch, lang, expected):
+    async def test_no_times(
+        self, db, context, bot, fake_availability, lang, result, expected
+    ):
         add_user(db, lang)
-        monkeypatch.setattr(booking, "get_available_slots", lambda *a: None)
-        update = make_update(data=f"book_{DATE}_{OFFICE_ID}_{SERVICE_ID}")
+        watch_id = add_watch(db)
+        fake_availability.day_results = [result]
 
-        state = await start_booking(update, make_context())
+        await press(booking.book_day, context, f"b1:{watch_id}:20261029")
+        await context.drain()
 
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == expected
+        assert bot.edits[-1].text == expected
+
+    @pytest.mark.parametrize(
+        ("lang", "result", "expected"),
+        [
+            ("en", (), "😕 No free times left on Thu 29.10."),
+            ("ru", (), "😕 На Чт 29.10 свободного времени больше нет."),
+            ("en", None, "⚠️ I couldn't load the times for Thu 29.10 right now."),
+            ("ru", None, "⚠️ Сейчас не удалось загрузить время на Чт 29.10."),
+        ],
+    )
+    async def test_no_times_without_a_watch_promises_nothing(
+        self, db, context, bot, fake_availability, lang, result, expected
+    ):
+        add_user(db, lang)
+        fake_availability.day_results = [result]
+
+        await press(booking.book_legacy, context, "book_2026-10-29_10461_10339028")
+        await context.drain()
+
+        assert bot.edits[-1].text == expected
 
     @pytest.mark.parametrize(
         ("lang", "expected"),
         [
-            ("en", "❌ No time slots available for 2025-01-15."),
-            ("ru", "❌ На 2025-01-15 нет свободного времени."),
+            ("en", "This watch has ended. Start a new search with 🔎 Find a Termin."),
+            ("ru", "Этот поиск уже завершён. Начните новый через 🔎 Найти запись."),
         ],
     )
-    async def test_no_appointments_at_office(self, db, monkeypatch, lang, expected):
+    async def test_ended_watch_toast(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        monkeypatch.setattr(
-            booking,
-            "get_available_slots",
-            lambda *a: {"offices": [{"officeId": 999, "appointments": [TS]}]},
-        )
-        update = make_update(data=f"book_{DATE}_{OFFICE_ID}_{SERVICE_ID}")
 
-        state = await start_booking(update, make_context())
+        await press(booking.book_day, context, "b1:99:20261029")
 
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == expected
+        assert toasts(bot) == [expected]
 
     @pytest.mark.parametrize(
         ("lang", "expected"),
@@ -256,98 +240,89 @@ class TestStartBooking:
             ("ru", "❌ Некорректные данные записи. Пожалуйста, попробуйте снова."),
         ],
     )
-    async def test_invalid_data(self, db, lang, expected):
+    async def test_invalid_legacy_data_toast(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        update = make_update(data=f"book_{DATE}")
 
-        state = await start_booking(update, make_context())
+        await press(booking.book_legacy, context, "book_2026-13-01_10461_10339028")
 
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == expected
+        assert toasts(bot) == [expected]
 
 
-@pytest.mark.asyncio
 class TestTimeSelected:
-    @pytest.mark.parametrize("lang", LANGS)
-    async def test_cancel(self, db, lang):
-        add_user(db, lang)
-        open_session()
-        update = make_update(data="cancel_booking")
-
-        state = await time_selected(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == CANCELLED[lang]
-        assert get_booking_session(USER_ID) is None
-
     @pytest.mark.parametrize(
         ("lang", "expected"),
         [
             (
                 "en",
                 (
-                    "❌ Your booking session expired or was cleared.\n\n"
-                    "Please start a new booking from an appointment notification."
-                ),
-            ),
-            (
-                "ru",
-                (
-                    "❌ Время на оформление записи истекло, или процесс был сброшен.\n\n"
-                    "Пожалуйста, начните запись заново из уведомления о свободной "
-                    "записи."
-                ),
-            ),
-        ],
-    )
-    async def test_session_missing(self, db, lang, expected):
-        add_user(db, lang)
-        update = make_update(data=f"time_{TS}")
-
-        state = await time_selected(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == expected
-
-    @pytest.mark.parametrize(
-        ("lang", "expected"),
-        [
-            (
-                "en",
-                (
-                    "✅ Selected time: 10:30 on 2025-01-15\n\n"
+                    "✅ Selected time: 09:30 on 2026-10-29\n\n"
                     "Please enter your full name (as it appears on your documents):"
                 ),
             ),
             (
                 "ru",
                 (
-                    "✅ Выбранное время: 2025-01-15 в 10:30\n\n"
+                    "✅ Выбранное время: 2026-10-29 в 09:30\n\n"
                     "Введите имя и фамилию (как в документах):"
                 ),
             ),
         ],
     )
-    async def test_asks_for_name(self, db, lang, expected):
+    async def test_asks_for_name(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        open_session()
-        update = make_update(data=f"time_{TS}")
+        open_session(db, "SELECTING_TIME", timestamp=None)
 
-        state = await time_selected(update, make_context())
+        await press(booking.time_selected, context, f"b1:t:{OFFICE_ID}:{TS}")
 
-        assert state == ASKING_NAME
-        edit = update.callback_query.edits[-1]
-        assert edit.text == expected
-        assert buttons(edit.reply_markup) == [(CANCEL_BOOKING[lang], "cancel_booking")]
+        assert bot.edits[-1].text == expected
+        assert buttons(bot.edits[-1].reply_markup) == [(CANCEL_BOOKING[lang], "b1:x")]
 
-
-@pytest.mark.asyncio
-class TestNameReceived:
     @pytest.mark.parametrize(
-        ("lang", "expected"),
+        ("lang", "expected", "labels"),
         [
             (
                 "en",
+                (
+                    "🕐 09:30 on Thursday, October 29, 2026\n"
+                    "📍 Forstenrieder Allee\n\n"
+                    "Book with your saved details?\n"
+                    "👤 Ivan Petrov\n"
+                    "📧 ivan@example.com"
+                ),
+                ["✅ Yes, book it", "✏️ Enter other details", "❌ Cancel"],
+            ),
+            (
+                "ru",
+                (
+                    "🕐 четверг, 29 октября 2026, 09:30\n"
+                    "📍 Forstenrieder Allee\n\n"
+                    "Записаться с сохранёнными данными?\n"
+                    "👤 Ivan Petrov\n"
+                    "📧 ivan@example.com"
+                ),
+                ["✅ Да, записаться", "✏️ Ввести другие данные", "❌ Отмена"],
+            ),
+        ],
+    )
+    async def test_offers_saved_contact(self, db, context, bot, lang, expected, labels):
+        add_user(db, lang)
+        with Session(db) as session:
+            UserRepository(session).set_booking_contact(USER_ID, NAME, EMAIL)
+        open_session(db, "SELECTING_TIME", timestamp=None)
+
+        await press(booking.time_selected, context, f"b1:t:{OFFICE_ID}:{TS}")
+
+        assert bot.edits[-1].text == expected
+        assert [text for text, _ in buttons(bot.edits[-1].reply_markup)] == labels
+
+
+class TestNameReceived:
+    @pytest.mark.parametrize(
+        ("lang", "text", "expected"),
+        [
+            (
+                "en",
+                "Ivan",
                 (
                     "❌ Please enter your full name (first and last name).\n\n"
                     "Example: John Smith"
@@ -355,36 +330,24 @@ class TestNameReceived:
             ),
             (
                 "ru",
-                ("❌ Пожалуйста, введите имя и фамилию.\n\nПример: Ivan Petrov"),
+                "Ivan",
+                "❌ Пожалуйста, введите имя и фамилию.\n\nПример: Ivan Petrov",
+            ),
+            ("en", "I P", "❌ Name is too short. Please enter your full name:"),
+            (
+                "ru",
+                "I P",
+                "❌ Имя слишком короткое. Пожалуйста, введите имя и фамилию:",
             ),
         ],
     )
-    async def test_single_word(self, db, lang, expected):
+    async def test_invalid(self, db, context, bot, lang, text, expected):
         add_user(db, lang)
-        open_session(timestamp=TS, state="ASKING_NAME")
-        update = make_update(text="Ivan")
+        open_session(db, "ASKING_NAME")
 
-        state = await name_received(update, make_context())
+        await type_text(booking.name_received, context, text)
 
-        assert state == ASKING_NAME
-        assert update.message.replies[-1].text == expected
-
-    @pytest.mark.parametrize(
-        ("lang", "expected"),
-        [
-            ("en", "❌ Name is too short. Please enter your full name:"),
-            ("ru", "❌ Имя слишком короткое. Пожалуйста, введите имя и фамилию:"),
-        ],
-    )
-    async def test_too_short(self, db, lang, expected):
-        add_user(db, lang)
-        open_session(timestamp=TS, state="ASKING_NAME")
-        update = make_update(text="I P")
-
-        state = await name_received(update, make_context())
-
-        assert state == ASKING_NAME
-        assert update.message.replies[-1].text == expected
+        assert [s.text for s in bot.sent] == [expected]
 
     @pytest.mark.parametrize(
         ("lang", "expected"),
@@ -407,20 +370,17 @@ class TestNameReceived:
             ),
         ],
     )
-    async def test_asks_for_email(self, db, lang, expected):
+    async def test_asks_for_email(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        open_session(timestamp=TS, state="ASKING_NAME")
-        update = make_update(text=NAME)
+        open_session(db, "ASKING_NAME")
 
-        state = await name_received(update, make_context())
+        await type_text(booking.name_received, context, NAME)
 
-        assert state == ASKING_EMAIL
-        reply = update.message.replies[-1]
-        assert reply.text == expected
-        assert buttons(reply.reply_markup) == [(CANCEL_BOOKING[lang], "cancel_booking")]
+        [sent] = bot.sent
+        assert sent.text == expected
+        assert buttons(sent.reply_markup) == [(CANCEL_BOOKING[lang], "b1:x")]
 
 
-@pytest.mark.asyncio
 class TestEmailReceived:
     @pytest.mark.parametrize(
         ("lang", "expected"),
@@ -441,25 +401,13 @@ class TestEmailReceived:
             ),
         ],
     )
-    async def test_invalid_email(self, db, lang, expected):
+    async def test_invalid_email(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        open_session(timestamp=TS, name=NAME, state="ASKING_EMAIL")
-        update = make_update(text="not-an-email")
+        open_session(db, "ASKING_EMAIL", name=NAME)
 
-        state = await email_received(update, make_context())
+        await type_text(booking.email_received, context, "not-an-email")
 
-        assert state == ASKING_EMAIL
-        assert update.message.replies[-1].text == expected
-
-    @pytest.mark.parametrize("lang", LANGS)
-    async def test_session_expired(self, db, lang):
-        add_user(db, lang)
-        update = make_update(text=EMAIL)
-
-        state = await email_received(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.message.replies[-1].text == SESSION_EXPIRED[lang]
+        assert [s.text for s in bot.sent] == [expected]
 
     @pytest.mark.parametrize(
         ("lang", "expected"),
@@ -468,7 +416,7 @@ class TestEmailReceived:
                 "en",
                 (
                     "📋 <b>Please confirm your booking:</b>\n\n"
-                    "🕐 Time: 10:30 on Wednesday, January 15, 2025\n"
+                    "🕐 Time: 09:30 on Thursday, October 29, 2026\n"
                     "👤 Name: Ivan Petrov\n"
                     "📧 Email: ivan@example.com\n\n"
                     "<b>Important:</b> You will receive a confirmation email. "
@@ -480,7 +428,7 @@ class TestEmailReceived:
                 "ru",
                 (
                     "📋 <b>Пожалуйста, подтвердите запись:</b>\n\n"
-                    "🕐 Время: среда, 15 января 2025, 10:30\n"
+                    "🕐 Время: четверг, 29 октября 2026, 09:30\n"
                     "👤 Имя: Ivan Petrov\n"
                     "📧 Эл. почта: ivan@example.com\n\n"
                     "<b>Важно:</b> вам придёт письмо с подтверждением. "
@@ -490,121 +438,194 @@ class TestEmailReceived:
             ),
         ],
     )
-    async def test_confirmation_summary(self, db, lang, expected):
+    async def test_confirmation_summary(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        open_session(timestamp=TS, name=NAME, state="ASKING_EMAIL")
-        update = make_update(text=EMAIL)
+        open_session(db, "ASKING_EMAIL", name=NAME)
 
-        state = await email_received(update, make_context())
+        await type_text(booking.email_received, context, EMAIL)
 
-        assert state == CONFIRMING
-        reply = update.message.replies[-1]
-        assert reply.text == expected
-        assert reply.parse_mode == "HTML"
-        assert buttons(reply.reply_markup) == [
-            (CONFIRM[lang], "confirm_booking"),
-            (CANCEL[lang], "cancel_booking"),
+        [sent] = bot.sent
+        assert sent.text == expected
+        assert sent.parse_mode == "HTML"
+        assert buttons(sent.reply_markup) == [
+            (CONFIRM[lang], "b1:ok"),
+            (CANCEL[lang], "b1:x"),
         ]
 
     @pytest.mark.parametrize(
         ("lang", "expected"),
         [
-            ("en", "🕐 Time: 09:05 on Wednesday, March 05, 2025\n"),
-            ("ru", "🕐 Время: среда, 5 марта 2025, 09:05\n"),
+            ("en", "🕐 Time: 09:05 on Thursday, November 05, 2026\n"),
+            ("ru", "🕐 Время: четверг, 5 ноября 2026, 09:05\n"),
         ],
     )
-    async def test_single_digit_day(self, db, lang, expected):
+    async def test_single_digit_day(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        open_session(timestamp=TS_SINGLE_DIGIT_DAY, name=NAME, state="ASKING_EMAIL")
-        update = make_update(text=EMAIL)
+        open_session(db, "ASKING_EMAIL", timestamp=TS_SINGLE_DIGIT_DAY, name=NAME)
 
-        await email_received(update, make_context())
+        await type_text(booking.email_received, context, EMAIL)
 
-        assert expected in update.message.replies[-1].text
+        assert expected in bot.sent[-1].text
 
 
-@pytest.mark.asyncio
+@pytest.fixture
+def city(monkeypatch):
+    results = []
+
+    async def book_appointment(**kwargs):
+        result = results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(booking.booking_api, "book_appointment", book_appointment)
+    return results
+
+
+SUCCESS = {
+    "en": (
+        "🎉 <b>Booking Successful!</b> 🎉\n\n"
+        "📋 Booking ID: P-42\n"
+        "🕐 Time: 09:30 on Thursday, October 29, 2026\n"
+        "👤 Name: Ivan Petrov\n"
+        "📧 Email: ivan@example.com\n\n"
+        "<b>⚠️ IMPORTANT - Next Steps:</b>\n\n"
+        "1. Check your email inbox at <b>ivan@example.com</b>\n"
+        "2. Look for a confirmation email from the City of Munich "
+        "(Landeshauptstadt München)\n"
+        "3. <b>Click the confirmation link</b> in that email\n"
+        "4. Your appointment will only be finalized after email confirmation\n\n"
+        "If you don't see the email within 5 minutes, check your spam folder."
+    ),
+    "ru": (
+        "🎉 <b>Запись оформлена!</b> 🎉\n\n"
+        "📋 Номер записи: P-42\n"
+        "🕐 Время: четверг, 29 октября 2026, 09:30\n"
+        "👤 Имя: Ivan Petrov\n"
+        "📧 Эл. почта: ivan@example.com\n\n"
+        "<b>⚠️ ВАЖНО — что делать дальше:</b>\n\n"
+        "1. Проверьте почтовый ящик <b>ivan@example.com</b>\n"
+        "2. Найдите письмо с подтверждением от города Мюнхена "
+        "(Landeshauptstadt München)\n"
+        "3. <b>Перейдите по ссылке для подтверждения</b> в этом письме\n"
+        "4. Запись будет окончательно оформлена только после подтверждения "
+        "по электронной почте\n\n"
+        "Если письмо не пришло в течение 5 минут, проверьте папку «Спам»."
+    ),
+}
+FINISHED = {
+    "en": "✅ I've stopped watching Address registration (Anmeldung) for you.",
+    "ru": "✅ Поиск «Регистрация по адресу (Anmeldung)» завершён.",
+}
+FAILED = {
+    "en": (
+        "❌ <b>Booking Failed</b>\n\n"
+        "The appointment could not be booked. Possible reasons:\n"
+        "• The slot was just taken by someone else\n"
+        "• Network error occurred\n"
+        "• Captcha token expired\n\n"
+        "Please try booking another available slot."
+    ),
+    "ru": (
+        "❌ <b>Запись не удалась</b>\n\n"
+        "Не удалось оформить запись. Возможные причины:\n"
+        "• это время только что занял кто-то другой\n"
+        "• произошла ошибка сети\n"
+        "• истёк срок действия капчи\n\n"
+        "Пожалуйста, попробуйте выбрать другое свободное время."
+    ),
+}
+WILL_UPDATE = {
+    "en": "I'll keep watching and send you the current free slots.",
+    "ru": "Я продолжаю искать и пришлю актуальные свободные записи.",
+}
+ERROR = {
+    "en": (
+        "❌ An error occurred while booking:\nboom &lt;1&gt;\n\n"
+        "Please try again or contact support."
+    ),
+    "ru": (
+        "❌ При оформлении записи произошла ошибка:\nboom &lt;1&gt;\n\n"
+        "Пожалуйста, попробуйте снова или обратитесь в поддержку."
+    ),
+}
+
+
 class TestConfirmBooking:
-    @pytest.mark.parametrize("lang", LANGS)
-    async def test_cancel(self, db, lang):
-        add_user(db, lang)
-        open_session(timestamp=TS, name=NAME, email=EMAIL, state="CONFIRMING")
-        update = make_update(data="cancel_booking")
-
-        state = await confirm_booking(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == CANCELLED[lang]
-
-    @pytest.mark.parametrize("lang", LANGS)
-    async def test_session_expired(self, db, lang):
-        add_user(db, lang)
-        update = make_update(data="confirm_booking")
-
-        state = await confirm_booking(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == SESSION_EXPIRED[lang]
-
     @pytest.mark.parametrize(
-        ("lang", "processing", "expected"),
+        ("lang", "processing"),
         [
-            (
-                "en",
-                "⏳ Processing your booking...\nThis may take a few seconds.",
-                (
-                    "🎉 <b>Booking Successful!</b> 🎉\n\n"
-                    "📋 Booking ID: P-42\n"
-                    "🕐 Time: 10:30 on Wednesday, January 15, 2025\n"
-                    "👤 Name: Ivan Petrov\n"
-                    "📧 Email: ivan@example.com\n\n"
-                    "<b>⚠️ IMPORTANT - Next Steps:</b>\n\n"
-                    "1. Check your email inbox at <b>ivan@example.com</b>\n"
-                    "2. Look for a confirmation email from Munich Ausländerbehörde\n"
-                    "3. <b>Click the confirmation link</b> in that email\n"
-                    "4. Your appointment will only be finalized after email "
-                    "confirmation\n\n"
-                    "If you don't see the email within 5 minutes, check your spam "
-                    "folder."
-                ),
-            ),
-            (
-                "ru",
-                "⏳ Оформляю запись...\nЭто может занять несколько секунд.",
-                (
-                    "🎉 <b>Запись оформлена!</b> 🎉\n\n"
-                    "📋 Номер записи: P-42\n"
-                    "🕐 Время: среда, 15 января 2025, 10:30\n"
-                    "👤 Имя: Ivan Petrov\n"
-                    "📧 Эл. почта: ivan@example.com\n\n"
-                    "<b>⚠️ ВАЖНО — что делать дальше:</b>\n\n"
-                    "1. Проверьте почтовый ящик <b>ivan@example.com</b>\n"
-                    "2. Найдите письмо с подтверждением от Ausländerbehörde München\n"
-                    "3. <b>Перейдите по ссылке для подтверждения</b> в этом письме\n"
-                    "4. Запись будет окончательно оформлена только после "
-                    "подтверждения по электронной почте\n\n"
-                    "Если письмо не пришло в течение 5 минут, проверьте папку "
-                    "«Спам»."
-                ),
-            ),
+            ("en", "⏳ Processing your booking...\nThis may take a few seconds."),
+            ("ru", "⏳ Оформляю запись...\nЭто может занять несколько секунд."),
         ],
     )
-    async def test_success(self, db, monkeypatch, lang, processing, expected):
+    async def test_success_from_a_watch(self, db, context, bot, city, lang, processing):
         add_user(db, lang)
-        open_session(timestamp=TS, name=NAME, email=EMAIL, state="CONFIRMING")
-        monkeypatch.setattr(
-            booking, "book_appointment_complete", lambda **kw: {"processId": "P-42"}
-        )
-        update = make_update(data="confirm_booking")
+        watch_id = add_watch(db, live=False)
+        open_session(db, "CONFIRMING", name=NAME, email=EMAIL, watch_id=watch_id)
+        city.append({"processId": "P-42"})
 
-        state = await confirm_booking(update, make_context())
+        await press(booking.confirm, context, "b1:ok")
+        await context.drain()
 
-        assert state == ConversationHandler.END
-        edits = update.callback_query.edits
-        assert [e.text for e in edits] == [processing, expected]
-        assert edits[-1].parse_mode == "HTML"
-        assert buttons(edits[-1].reply_markup) == [(MAIN_MENU[lang], "main_menu")]
-        assert get_booking_session(USER_ID) is None
+        assert [e.text for e in bot.edits] == [
+            processing,
+            SUCCESS[lang] + "\n\n" + FINISHED[lang],
+        ]
+        assert bot.edits[-1].parse_mode == "HTML"
+        assert bot.edits[-1].reply_markup is None
+
+    @pytest.mark.parametrize("lang", LANGS)
+    async def test_success_without_a_watch(self, db, context, bot, city, lang):
+        add_user(db, lang)
+        open_session(db, "CONFIRMING", name=NAME, email=EMAIL)
+        city.append({"processId": "P-42"})
+
+        await press(booking.confirm, context, "b1:ok")
+        await context.drain()
+
+        assert bot.edits[-1].text == SUCCESS[lang]
+
+    @pytest.mark.parametrize("lang", LANGS)
+    async def test_failure(self, db, context, bot, city, lang):
+        add_user(db, lang)
+        watch_id = add_watch(db, live=False)
+        open_session(db, "CONFIRMING", name=NAME, email=EMAIL, watch_id=watch_id)
+        city.append(None)
+
+        await press(booking.confirm, context, "b1:ok")
+        await context.drain()
+
+        assert bot.edits[-1].text == FAILED[lang] + "\n\n" + WILL_UPDATE[lang]
+        assert buttons(bot.edits[-1].reply_markup) == [(MY_WATCHES[lang], "w1:list")]
+
+    @pytest.mark.parametrize("lang", LANGS)
+    async def test_error(self, db, context, bot, city, caplog, lang):
+        add_user(db, lang)
+        open_session(db, "CONFIRMING", name=NAME, email=EMAIL)
+        city.append(RuntimeError("boom <1>"))
+
+        await press(booking.confirm, context, "b1:ok")
+        await context.drain()
+
+        assert bot.edits[-1].text == ERROR[lang]
+        assert [
+            r.getMessage() for r in caplog.records if r.name == booking.__name__
+        ] == ["Booking error: boom <1>"]
+
+
+class TestCancelAndCleared:
+    @pytest.mark.parametrize(
+        ("lang", "expected"),
+        [("en", "❌ Booking cancelled."), ("ru", "❌ Запись отменена.")],
+    )
+    async def test_cancel(self, db, context, bot, lang, expected):
+        add_user(db, lang)
+        open_session(db, "ASKING_NAME")
+
+        await press(booking.cancel, context, "b1:x")
+
+        assert bot.edits[-1].text == expected
 
     @pytest.mark.parametrize(
         ("lang", "expected"),
@@ -612,97 +633,23 @@ class TestConfirmBooking:
             (
                 "en",
                 (
-                    "❌ <b>Booking Failed</b>\n\n"
-                    "The appointment could not be booked. Possible reasons:\n"
-                    "• The slot was just taken by someone else\n"
-                    "• Network error occurred\n"
-                    "• Captcha token expired\n\n"
-                    "Please try booking another available slot."
+                    "❌ Your booking session expired or was cleared.\n\n"
+                    "Please start a new booking from an appointment notification."
                 ),
             ),
             (
                 "ru",
                 (
-                    "❌ <b>Запись не удалась</b>\n\n"
-                    "Не удалось оформить запись. Возможные причины:\n"
-                    "• это время только что занял кто-то другой\n"
-                    "• произошла ошибка сети\n"
-                    "• истёк срок действия капчи\n\n"
-                    "Пожалуйста, попробуйте выбрать другое свободное время."
+                    "❌ Время на оформление записи истекло, или процесс был сброшен.\n\n"
+                    "Пожалуйста, начните запись заново из уведомления о свободной "
+                    "записи."
                 ),
             ),
         ],
     )
-    async def test_failure(self, db, monkeypatch, lang, expected):
+    async def test_session_cleared(self, db, context, bot, lang, expected):
         add_user(db, lang)
-        open_session(timestamp=TS, name=NAME, email=EMAIL, state="CONFIRMING")
-        monkeypatch.setattr(booking, "book_appointment_complete", lambda **kw: None)
-        update = make_update(data="confirm_booking")
 
-        await confirm_booking(update, make_context())
+        await press(booking.booking_orphan_callback, context, "b1:ok")
 
-        edit = update.callback_query.edits[-1]
-        assert edit.text == expected
-        assert edit.parse_mode == "HTML"
-        assert buttons(edit.reply_markup) == [(MAIN_MENU[lang], "main_menu")]
-
-    @pytest.mark.parametrize(
-        ("lang", "expected"),
-        [
-            (
-                "en",
-                (
-                    "❌ An error occurred while booking:\nboom\n\n"
-                    "Please try again or contact support."
-                ),
-            ),
-            (
-                "ru",
-                (
-                    "❌ При оформлении записи произошла ошибка:\nboom\n\n"
-                    "Пожалуйста, попробуйте снова или обратитесь в поддержку."
-                ),
-            ),
-        ],
-    )
-    async def test_error(self, db, monkeypatch, caplog, lang, expected):
-        add_user(db, lang)
-        open_session(timestamp=TS, name=NAME, email=EMAIL, state="CONFIRMING")
-
-        def fail(**kwargs):
-            raise RuntimeError("boom")
-
-        monkeypatch.setattr(booking, "book_appointment_complete", fail)
-        update = make_update(data="confirm_booking")
-
-        await confirm_booking(update, make_context())
-
-        edit = update.callback_query.edits[-1]
-        assert edit.text == expected
-        assert buttons(edit.reply_markup) == [(MAIN_MENU[lang], "main_menu")]
-        assert [r.getMessage() for r in caplog.records] == ["Booking error: boom"]
-
-
-@pytest.mark.asyncio
-class TestCancellation:
-    @pytest.mark.parametrize("lang", LANGS)
-    async def test_cancel_button(self, db, lang):
-        add_user(db, lang)
-        open_session(timestamp=TS, state="ASKING_NAME")
-        update = make_update(data="cancel_booking")
-
-        state = await cancel_booking_button(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.callback_query.edits[-1].text == CANCELLED[lang]
-
-    @pytest.mark.parametrize("lang", LANGS)
-    async def test_command_fallback(self, db, lang):
-        add_user(db, lang)
-        open_session(timestamp=TS, state="ASKING_NAME")
-        update = make_update(text="/menu")
-
-        state = await cancel_booking_conversation(update, make_context())
-
-        assert state == ConversationHandler.END
-        assert update.message.replies[-1].text == CANCELLED[lang]
+        assert bot.edits[-1].text == expected

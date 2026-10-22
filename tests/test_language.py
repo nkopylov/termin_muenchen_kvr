@@ -14,7 +14,15 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
-from telegram import CallbackQuery, Chat, Message, Update
+from telegram import (
+    CallbackQuery,
+    Chat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram import User as TgUser
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -26,6 +34,7 @@ from telegram.ext import (
 )
 
 from src import database
+from src.commands import find as find_module
 from src.commands import language as language_module
 from src.commands import start as start_module
 from src.commands.language import (
@@ -36,15 +45,19 @@ from src.commands.language import (
     language_menu_callback,
     set_default_commands,
 )
-from src.commands.menu import menu_command
+from src.commands.settings import build_settings_screen
 from src.commands.start import start_command
+from src.commands.watches import build_watches_screen
 from src.db_models import User
-from src.handlers.buttons import show_main_menu
+from src.handlers import text_input
 from src.handlers.language_picker import build_language_picker
 from src.handlers.legacy_callbacks import legacy_callback
 from src.i18n import t
 from src.i18n.user_language import get_user_language, set_user_language
-from src.repositories import UserRepository
+from src.repositories import UserRepository, WatchRepository
+from src.watches.when import PRESETS
+from tests.fakes import FakeBot as RecordingBot
+from tests.fakes import FakeContext, make_callback_update, make_text_update
 
 USER_ID = 4242
 CHAT_ID = 4242
@@ -220,6 +233,46 @@ class TestPicker:
         assert buttons(markup) == [("🇬🇧 English", "lang:en"), ("🇷🇺 Русский", "lang:ru")]
 
 
+FIND_TEXT = "FIND SCREEN"
+FIND_MARKUP = InlineKeyboardMarkup(
+    [[InlineKeyboardButton("x", callback_data="f1:all")]]
+)
+
+
+@pytest.fixture
+def find_screen(monkeypatch):
+    """The Find screen belongs to the find stream; a fixed stand-in"""
+    monkeypatch.setattr(
+        find_module, "build_find_screen", lambda lang: (FIND_TEXT, FIND_MARKUP)
+    )
+
+
+@pytest.fixture(autouse=True)
+def pending_input(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        text_input, "clear_pending_input", lambda context: calls.append(context)
+    )
+    return calls
+
+
+def ui_version(db, user_id=USER_ID):
+    with Session(db) as session:
+        return session.get(User, user_id).ui_version
+
+
+def nav_pointer(db, user_id=USER_ID):
+    with Session(db) as session:
+        return UserRepository(session).get_nav_message_id(user_id)
+
+
+def add_watch(db, user_id=USER_ID):
+    with Session(db) as session:
+        WatchRepository(session).create_or_update(
+            user_id, 1063475, None, PRESETS["asap"]
+        )
+
+
 @pytest.mark.asyncio
 class TestStartCommand:
     async def test_new_user_is_created_unset_and_sees_picker(self, db, events):
@@ -231,7 +284,7 @@ class TestStartCommand:
         assert stored_language(db) == ""
         with Session(db) as session:
             user = session.get(User, USER_ID)
-            assert user.start_date and user.end_date
+            assert (user.start_date, user.end_date) == (None, None)
         sent = context.bot.sent[-1]
         assert sent.text == t("language.picker_prompt", "en")
         assert buttons(sent.reply_markup)[0] == ("🇷🇺 Русский", "lang:ru")
@@ -245,27 +298,55 @@ class TestStartCommand:
 
         await start_command(update, context)
 
-        assert context.bot.sent[-1].text == t("language.picker_prompt", "en")
-        assert update.message.replies == []
+        assert [s.text for s in context.bot.sent] == [t("language.picker_prompt", "en")]
         assert stored_language(db) == ""
 
     @pytest.mark.parametrize("lang", ["en", "ru"])
-    async def test_user_with_language_sees_welcome_in_it(self, db, events, lang):
+    async def test_returning_user_without_watches_gets_keyboard_and_find(
+        self, db, events, find_screen, pending_input, lang
+    ):
         add_user(db, lang)
-        update = make_update(text="/start")
+        bot = RecordingBot()
+        context = FakeContext(bot)
 
-        await start_command(update, make_context())
+        await start_command(
+            make_text_update("/start", user_id=USER_ID, bot=bot), context
+        )
 
-        reply = update.message.replies[-1]
-        assert reply.text == t("start.welcome", lang)
-        assert reply.parse_mode == "HTML"
-        assert buttons(reply.reply_markup) == [
-            (t("common.btn_main_menu", lang), "main_menu")
-        ]
+        welcome, follow_up = bot.sent
+        assert welcome.text == t("start.welcome_back", lang)
+        assert welcome.parse_mode == "HTML"
+        assert isinstance(welcome.reply_markup, ReplyKeyboardMarkup)
+        assert welcome.reply_markup.keyboard[0][0].text == t("keyboard.find", lang)
+        assert (follow_up.text, follow_up.reply_markup) == (FIND_TEXT, FIND_MARKUP)
+        assert nav_pointer(db) == follow_up.message_id
+        assert ui_version(db) == 2
+        assert pending_input == [context]
+
+    async def test_returning_user_with_watches_gets_my_watches(
+        self, db, events, catalog, clock, find_screen
+    ):
+        add_user(db, "ru")
+        add_watch(db)
+        with Session(db) as session:
+            UserRepository(session).set_nav_message_id(USER_ID, 33)
+        bot = RecordingBot()
+
+        await start_command(
+            make_text_update("/start", user_id=USER_ID, bot=bot), FakeContext(bot)
+        )
+
+        _, follow_up = bot.sent
+        assert (follow_up.text, follow_up.reply_markup) == build_watches_screen(
+            USER_ID, "ru", clock.now
+        )
+        [strip] = bot.calls_of("edit_message_reply_markup")
+        assert strip.message_id == 33
+        assert nav_pointer(db) == follow_up.message_id
 
     @pytest.mark.parametrize(("days_ago", "reengaged"), [(40, True), (5, False)])
     async def test_reengagement_measured_against_naive_utc(
-        self, db, events, days_ago, reengaged
+        self, db, events, find_screen, days_ago, reengaged
     ):
         add_user(db, "en")
         with Session(db) as session:
@@ -276,7 +357,10 @@ class TestStartCommand:
             session.add(user)
             session.commit()
 
-        await start_command(make_update(text="/start"), make_context())
+        bot = RecordingBot()
+        await start_command(
+            make_text_update("/start", user_id=USER_ID, bot=bot), FakeContext(bot)
+        )
 
         expected = ("user_reengaged", {"user_id": USER_ID, "days_inactive": days_ago})
         assert (expected in events) is reengaged
@@ -284,99 +368,130 @@ class TestStartCommand:
 
 @pytest.mark.asyncio
 class TestLanguageChoice:
-    async def test_first_choice_stores_language_and_shows_welcome(self, db, events):
+    async def test_first_choice_runs_onboarding(self, db, events, find_screen):
         add_user(db, "")
-        update = make_update(data="lang:ru")
-        context = make_context()
+        bot = RecordingBot()
+        context = FakeContext(bot)
 
-        await language_choice_callback(update, context)
+        await language_choice_callback(
+            make_callback_update("lang:ru", user_id=USER_ID, message_id=40, bot=bot),
+            context,
+        )
 
         assert stored_language(db) == "ru"
         assert context.user_data["lang"] == "ru"
-        assert update.callback_query.answered
-        edit = update.callback_query.edits[-1]
-        assert edit.text == t("start.welcome", "ru")
-        assert edit.parse_mode == "HTML"
-        assert buttons(edit.reply_markup) == [("🏠 Главное меню", "main_menu")]
+        assert len(bot.calls_of("answer_callback_query")) == 1
+        [deleted] = bot.calls_of("delete_message")
+        assert deleted.message_id == 40
+        welcome, find_message = bot.sent
+        assert welcome.text == t("start.welcome", "ru")
+        assert isinstance(welcome.reply_markup, ReplyKeyboardMarkup)
+        assert find_message.text == FIND_TEXT
+        assert nav_pointer(db) == find_message.message_id
+        assert ui_version(db) == 2
         assert ("language_selected", {"user_id": USER_ID, "language": "ru"}) in events
 
-    async def test_choice_sets_chat_commands_in_that_language(self, db, events):
+    async def test_first_choice_with_migrated_watches_shows_them(
+        self, db, events, catalog, clock, find_screen
+    ):
         add_user(db, "")
-        update = make_update(data="lang:ru")
-        context = make_context()
+        add_watch(db)
+        bot = RecordingBot()
 
-        await language_choice_callback(update, context)
+        await language_choice_callback(
+            make_callback_update("lang:en", user_id=USER_ID, message_id=40, bot=bot),
+            FakeContext(bot),
+        )
 
-        [call] = context.bot.command_calls
-        assert call["scope"].chat_id == CHAT_ID
-        descriptions = {c.command: c.description for c in call["commands"]}
+        welcome, follow_up = bot.sent
+        assert welcome.text == t("start.welcome", "en")
+        assert follow_up.text == build_watches_screen(USER_ID, "en", clock.now)[0]
+
+    async def test_choice_sets_chat_commands_in_that_language(
+        self, db, events, find_screen
+    ):
+        add_user(db, "")
+        bot = RecordingBot()
+
+        await language_choice_callback(
+            make_callback_update("lang:ru", user_id=USER_ID, bot=bot), FakeContext(bot)
+        )
+
+        [call] = bot.calls_of("set_my_commands")
+        assert call.scope.chat_id == CHAT_ID
+        descriptions = {c.command: c.description for c in call.commands}
         assert descriptions["language"] == "Сменить язык"
         assert descriptions["start"] == t("commands.start", "ru")
 
-    async def test_switching_shows_confirmation(self, db, events):
+    async def test_switching_turns_picker_into_settings_and_resends_keyboard(
+        self, db, events
+    ):
         add_user(db, "en")
-        update = make_update(data="lang:ru")
-        context = make_context({"lang": "en"})
+        bot = RecordingBot()
+        context = FakeContext(bot, {"lang": "en"})
 
-        await language_choice_callback(update, context)
+        await language_choice_callback(
+            make_callback_update("lang:ru", user_id=USER_ID, message_id=40, bot=bot),
+            context,
+        )
 
         assert stored_language(db) == "ru"
         assert context.user_data["lang"] == "ru"
-        edit = update.callback_query.edits[-1]
-        assert edit.text == t("language.changed", "ru")
-        assert buttons(edit.reply_markup) == [("🏠 Главное меню", "main_menu")]
-
-    async def test_switching_back_to_english(self, db, events):
-        add_user(db, "ru")
-        update = make_update(data="lang:en")
-
-        await language_choice_callback(update, make_context())
-
-        assert stored_language(db) == "en"
-        assert update.callback_query.edits[-1].text == t("language.changed", "en")
+        [edit] = bot.edits
+        assert edit.message_id == 40
+        assert (edit.text, edit.reply_markup) == build_settings_screen(USER_ID, "ru")
+        assert nav_pointer(db) == 40
+        [changed] = bot.sent
+        assert changed.text == t("language.changed", "ru")
+        assert isinstance(changed.reply_markup, ReplyKeyboardMarkup)
+        assert changed.reply_markup.keyboard[0][0].text == t("keyboard.find", "ru")
+        assert ui_version(db) == 2
 
     async def test_unknown_user_is_asked_to_start_and_not_registered(self, db, events):
-        update = make_update(data="lang:ru")
+        bot = RecordingBot()
 
-        await language_choice_callback(update, make_context())
+        await language_choice_callback(
+            make_callback_update("lang:ru", user_id=USER_ID, message_id=40, bot=bot),
+            FakeContext(bot),
+        )
 
         assert stored_language(db) is None
-        assert update.callback_query.edits[-1].text == t("menu.not_registered", "ru")
+        [edit] = bot.edits
+        assert edit.text == t("start.not_registered", "ru")
         assert not any(name == "user_registered" for name, _ in events)
 
     async def test_unsupported_language_is_ignored(self, db, events):
         add_user(db, "")
-        update = make_update(data="lang:de")
-        context = make_context()
+        bot = RecordingBot()
 
-        await language_choice_callback(update, context)
+        await language_choice_callback(
+            make_callback_update("lang:de", user_id=USER_ID, bot=bot), FakeContext(bot)
+        )
 
         assert stored_language(db) == ""
-        assert update.callback_query.answered
-        assert update.callback_query.edits == []
-        assert context.bot.command_calls == []
+        assert [c.method for c in bot.calls] == ["answer_callback_query"]
 
-    async def test_choice_survives_command_list_failure(self, db, events, caplog):
+    async def test_choice_survives_command_list_failure(
+        self, db, events, find_screen, caplog
+    ):
         add_user(db, "")
-        update = make_update(data="lang:ru")
-        context = make_context()
+        bot = RecordingBot()
+        bot.fail_next("set_my_commands", TelegramError("network down"))
 
-        async def fail(*args, **kwargs):
-            raise TelegramError("network down")
-
-        context.bot.set_my_commands = fail
-
-        with caplog.at_level(logging.WARNING, logger="src.commands.language"):
-            await language_choice_callback(update, context)
+        with caplog.at_level(logging.WARNING, logger="src.ui.commands_menu"):
+            await language_choice_callback(
+                make_callback_update("lang:ru", user_id=USER_ID, bot=bot),
+                FakeContext(bot),
+            )
 
         assert stored_language(db) == "ru"
-        assert update.callback_query.edits[-1].text == t("start.welcome", "ru")
+        assert bot.sent[0].text == t("start.welcome", "ru")
         assert any("network down" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.asyncio
 class TestLanguageCommand:
-    async def test_command_shows_picker(self, db):
+    async def test_command_shows_picker(self, db, pending_input):
         add_user(db, "en")
         update = make_update(text="/language", language_code="uk")
         context = make_context()
@@ -386,39 +501,22 @@ class TestLanguageCommand:
         sent = context.bot.sent[-1]
         assert sent.text == t("language.picker_prompt", "en")
         assert buttons(sent.reply_markup)[0] == ("🇷🇺 Русский", "lang:ru")
+        assert pending_input == [context]
 
-    async def test_menu_button_shows_picker(self, db):
+    async def test_settings_button_shows_picker_in_place(self, db):
         add_user(db, "ru")
-        update = make_update(data="language")
+        bot = RecordingBot()
 
-        await language_menu_callback(update, make_context())
+        await language_menu_callback(
+            make_callback_update("language", user_id=USER_ID, message_id=60, bot=bot),
+            FakeContext(bot),
+        )
 
-        assert update.callback_query.answered
-        edit = update.callback_query.edits[-1]
+        assert len(bot.calls_of("answer_callback_query")) == 1
+        [edit] = bot.edits
+        assert edit.message_id == 60
         assert edit.text == t("language.picker_prompt", "en")
         assert buttons(edit.reply_markup)[0] == ("🇬🇧 English", "lang:en")
-
-
-@pytest.mark.asyncio
-class TestMainMenuLanguageButton:
-    @pytest.mark.parametrize(
-        ("lang", "label"), [("en", "🌐 Language"), ("ru", "🌐 Язык")]
-    )
-    async def test_menu_command_has_language_button(self, db, lang, label):
-        add_user(db, lang)
-        update = make_update(text="/menu")
-
-        await menu_command(update, make_context())
-
-        assert (label, "language") in buttons(update.message.replies[-1].reply_markup)
-
-    async def test_inline_main_menu_has_language_button(self, db):
-        add_user(db, "ru")
-        query = FakeQuery(data="main_menu")
-
-        await show_main_menu(query, USER_ID)
-
-        assert ("🌐 Язык", "language") in buttons(query.edits[-1].reply_markup)
 
 
 @pytest.mark.asyncio

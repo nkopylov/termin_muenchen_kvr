@@ -3,11 +3,15 @@ Tests for repository layer (data access layer)
 """
 
 from datetime import datetime, timedelta
+
+from sqlmodel import select
+
+from src.db_models import ServiceSubscription
 from src.repositories import (
-    UserRepository,
-    SubscriptionRepository,
     AppointmentLogRepository,
     BookingSessionRepository,
+    SubscriptionRepository,
+    UserRepository,
 )
 
 
@@ -67,16 +71,6 @@ class TestUserRepository:
         assert user2.user_id == 12345
         assert user2.username == "original"  # Original username preserved
 
-    def test_set_date_range(self, db_session):
-        """Test setting user's date range filter"""
-        repo = UserRepository(db_session)
-        repo.create_user(user_id=12345)
-
-        repo.set_date_range(12345, "2025-01-01", "2025-12-31")
-        user = repo.get_user(12345)
-        assert user.start_date == "2025-01-01"
-        assert user.end_date == "2025-12-31"
-
     def test_get_all_users(self, db_session):
         """Test retrieving all users"""
         repo = UserRepository(db_session)
@@ -88,143 +82,30 @@ class TestUserRepository:
         assert len(users) == 3
         assert {u.user_id for u in users} == {1, 2, 3}
 
-    def test_delete_user(self, db_session):
-        """Test deleting a user"""
-        repo = UserRepository(db_session)
-        repo.create_user(user_id=12345)
-
-        result = repo.delete_user(12345)
-        assert result is True
-
-        user = repo.get_user(12345)
-        assert user is None
-
-    def test_delete_user_not_found(self, db_session):
-        """Test deleting non-existent user returns False"""
-        repo = UserRepository(db_session)
-        result = repo.delete_user(99999)
-        assert result is False
-
 
 class TestSubscriptionRepository:
     """Tests for SubscriptionRepository"""
 
-    def test_add_subscription(self, db_session):
-        """Test adding a service subscription"""
-        # First create a user
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-
-        sub_repo = SubscriptionRepository(db_session)
-        subscription = sub_repo.add_subscription(
-            user_id=12345, service_id=100, office_id=200
-        )
-
-        assert subscription.user_id == 12345
-        assert subscription.service_id == 100
-        assert subscription.office_id == 200
-
-    def test_add_subscription_duplicate(self, db_session):
-        """Test adding duplicate subscription returns existing"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-
-        sub_repo = SubscriptionRepository(db_session)
-        sub1 = sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-        sub2 = sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-
-        assert sub1.id == sub2.id  # Same subscription returned
-
-    def test_remove_subscription(self, db_session):
-        """Test removing a subscription"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-
-        sub_repo = SubscriptionRepository(db_session)
-        sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-
-        result = sub_repo.remove_subscription(user_id=12345, service_id=100)
-        assert result is True
-
-        subs = sub_repo.get_user_subscriptions(12345)
-        assert len(subs) == 0
-
-    def test_remove_subscription_not_found(self, db_session):
-        """Test removing non-existent subscription returns False"""
-        sub_repo = SubscriptionRepository(db_session)
-        result = sub_repo.remove_subscription(user_id=12345, service_id=999)
-        assert result is False
-
-    def test_get_user_subscriptions(self, db_session):
-        """Test retrieving user's subscriptions"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-
-        sub_repo = SubscriptionRepository(db_session)
-        sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-        sub_repo.add_subscription(user_id=12345, service_id=101, office_id=201)
-
-        subs = sub_repo.get_user_subscriptions(12345)
-        assert len(subs) == 2
-        assert {s["service_id"] for s in subs} == {100, 101}
-        assert {s["office_id"] for s in subs} == {200, 201}
-
-    def test_get_all_service_subscriptions(self, db_session):
-        """Test retrieving all subscriptions grouped by service/office"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=1)
-        user_repo.create_user(user_id=2)
-        user_repo.create_user(user_id=3)
-
-        sub_repo = SubscriptionRepository(db_session)
-        sub_repo.add_subscription(user_id=1, service_id=100, office_id=200)
-        sub_repo.add_subscription(user_id=2, service_id=100, office_id=200)
-        sub_repo.add_subscription(user_id=3, service_id=101, office_id=201)
-
-        grouped = sub_repo.get_all_service_subscriptions()
-        assert "100_200" in grouped
-        assert set(grouped["100_200"]) == {1, 2}
-        assert "101_201" in grouped
-        assert set(grouped["101_201"]) == {3}
-
-    def test_has_subscription(self, db_session):
-        """Test checking if user has a subscription"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-
-        sub_repo = SubscriptionRepository(db_session)
-        sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-
-        assert sub_repo.has_subscription(12345, 100, 200) is True
-        assert sub_repo.has_subscription(12345, 999, 999) is False
-
-    def test_get_subscription_count(self, db_session):
-        """Test getting count of user's subscriptions"""
-        user_repo = UserRepository(db_session)
-        user_repo.create_user(user_id=12345)
-
-        sub_repo = SubscriptionRepository(db_session)
-        sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-        sub_repo.add_subscription(user_id=12345, service_id=101, office_id=201)
-        sub_repo.add_subscription(user_id=12345, service_id=102, office_id=202)
-
-        count = sub_repo.get_subscription_count(12345)
-        assert count == 3
-
     def test_delete_all_user_subscriptions(self, db_session):
-        """Test deleting all subscriptions for a user"""
+        """Deletes only the given user's subscriptions"""
         user_repo = UserRepository(db_session)
         user_repo.create_user(user_id=12345)
+        user_repo.create_user(user_id=2)
+        for user_id, service_id in ((12345, 100), (12345, 101), (2, 100)):
+            db_session.add(
+                ServiceSubscription(
+                    user_id=user_id, service_id=service_id, office_id=200
+                )
+            )
+        db_session.commit()
 
-        sub_repo = SubscriptionRepository(db_session)
-        sub_repo.add_subscription(user_id=12345, service_id=100, office_id=200)
-        sub_repo.add_subscription(user_id=12345, service_id=101, office_id=201)
-
-        deleted_count = sub_repo.delete_all_user_subscriptions(12345)
+        deleted_count = SubscriptionRepository(
+            db_session
+        ).delete_all_user_subscriptions(12345)
         assert deleted_count == 2
 
-        subs = sub_repo.get_user_subscriptions(12345)
-        assert len(subs) == 0
+        remaining = db_session.exec(select(ServiceSubscription)).all()
+        assert [s.user_id for s in remaining] == [2]
 
 
 class TestAppointmentLogRepository:
@@ -473,85 +354,3 @@ class TestBookingSessionRepository:
         # Read-only: expired sessions are removed by the checker's cleanup, not here
         assert repo.is_user_in_booking(12345) is False
         assert repo.get_session(12345) is not None
-
-    def test_cleanup_expired_sessions(self, db_session):
-        """Test cleaning up all expired sessions"""
-        repo = BookingSessionRepository(db_session)
-        now = datetime.utcnow()
-
-        # Create 2 expired sessions
-        repo.create_session(
-            user_id=1,
-            state="SELECTING_TIME",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token1",
-            expires_at=now - timedelta(minutes=1),
-        )
-        repo.create_session(
-            user_id=2,
-            state="SELECTING_TIME",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token2",
-            expires_at=now - timedelta(minutes=2),
-        )
-
-        # Create 1 active session
-        repo.create_session(
-            user_id=3,
-            state="SELECTING_TIME",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token3",
-            expires_at=now + timedelta(minutes=15),
-        )
-
-        deleted_count = repo.cleanup_expired_sessions()
-        assert deleted_count == 2
-
-        # Active session should still exist
-        assert repo.get_session(3) is not None
-
-    def test_get_all_active_sessions(self, db_session):
-        """Test retrieving all active (non-expired) sessions"""
-        repo = BookingSessionRepository(db_session)
-        now = datetime.utcnow()
-
-        # Create 2 active sessions
-        repo.create_session(
-            user_id=1,
-            state="SELECTING_TIME",
-            service_id=100,
-            office_id=200,
-            date="2025-01-15",
-            captcha_token="token1",
-            expires_at=now + timedelta(minutes=15),
-        )
-        repo.create_session(
-            user_id=2,
-            state="ASKING_NAME",
-            service_id=101,
-            office_id=201,
-            date="2025-01-16",
-            captcha_token="token2",
-            expires_at=now + timedelta(minutes=10),
-        )
-
-        # Create 1 expired session
-        repo.create_session(
-            user_id=3,
-            state="CONFIRMING",
-            service_id=102,
-            office_id=202,
-            date="2025-01-17",
-            captcha_token="token3",
-            expires_at=now - timedelta(minutes=1),
-        )
-
-        active_sessions = repo.get_all_active_sessions()
-        assert len(active_sessions) == 2
-        assert {s.user_id for s in active_sessions} == {1, 2}
