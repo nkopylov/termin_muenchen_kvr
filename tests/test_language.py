@@ -39,8 +39,9 @@ from src.commands.language import (
 from src.commands.menu import menu_command
 from src.commands.start import start_command
 from src.db_models import User
-from src.handlers.buttons import button_callback, show_main_menu
+from src.handlers.buttons import show_main_menu
 from src.handlers.language_picker import build_language_picker
+from src.handlers.legacy_callbacks import legacy_callback
 from src.i18n import t
 from src.i18n.user_language import get_user_language, set_user_language
 from src.repositories import UserRepository
@@ -461,6 +462,12 @@ class TestGate:
             {"data": "time_1796292600"},
             {"data": "confirm_booking"},
             {"data": "cancel_booking"},
+            {"data": "b1:17:20261029"},
+            {"data": "b1:t:102526:1793260800"},
+            {"data": "b1:x"},
+            {"data": "s1:del"},
+            {"data": "s1:dely"},
+            {"data": "s1:deln"},
         ],
     )
     async def test_unset_user_passes_language_stop_and_booking(self, db, kwargs):
@@ -501,11 +508,9 @@ class TestBotCommands:
         commands = bot_commands(lang)
         assert [c.command for c in commands] == [
             "start",
-            "menu",
-            "subscribe",
-            "myservices",
-            "setdates",
-            "status",
+            "find",
+            "watches",
+            "settings",
             "help",
             "language",
             "stop",
@@ -551,13 +556,14 @@ class TestHandlerRegistration:
         return app
 
     def _first_match(self, application, update):
-        for handler in application.handlers[0]:
+        for handler in application.handlers[1]:
             if handler.check_update(update):
                 return handler
         return None
 
-    def test_gate_runs_before_all_other_handlers(self, application):
-        assert min(application.handlers) == -1
+    def test_gate_runs_before_screen_handlers(self, application):
+        # Only presence (-3) and the interaction tracker (-2) run earlier; neither stops updates
+        assert sorted(application.handlers)[:3] == [-3, -2, -1]
         [gate] = application.handlers[-1]
         assert isinstance(gate, TypeHandler)
         assert gate.callback is language_gate
@@ -567,7 +573,7 @@ class TestHandlerRegistration:
         [
             ("lang:ru", language_choice_callback),
             ("language", language_menu_callback),
-            ("main_menu", button_callback),
+            ("main_menu", legacy_callback),
         ],
     )
     def test_callbacks_route_to_expected_handler(self, application, data, callback):
@@ -580,7 +586,7 @@ class TestHandlerRegistration:
             isinstance(h, CommandHandler)
             and h.commands == frozenset({"language"})
             and h.callback is language_command
-            for h in application.handlers[0]
+            for h in application.handlers[1]
         )
 
 
@@ -601,14 +607,14 @@ class TestLanguageResetMigration:
 
         assert stored_language(engine, 1) == ""
         assert stored_language(engine, 2) == ""
-        assert self._user_version(engine) == 1
+        assert self._user_version(engine) == 2
 
         with Session(engine) as session:
             UserRepository(session).set_language(1, "ru")
         database.init_database()
 
         assert stored_language(engine, 1) == "ru"
-        assert self._user_version(engine) == 1
+        assert self._user_version(engine) == 2
 
     def test_fresh_database_is_marked_migrated(self, monkeypatch, tmp_path):
         engine = create_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
@@ -618,7 +624,7 @@ class TestLanguageResetMigration:
         add_user(engine, "ru", user_id=1)
         database.init_database()
 
-        assert self._user_version(engine) == 1
+        assert self._user_version(engine) == 2
         assert stored_language(engine, 1) == "ru"
 
     def test_init_creates_tables_without_prior_model_import(self, tmp_path):
@@ -643,4 +649,4 @@ class TestLanguageResetMigration:
             }
             version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert "users" in tables
-        assert version == 1
+        assert version == 2

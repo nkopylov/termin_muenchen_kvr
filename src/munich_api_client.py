@@ -4,8 +4,10 @@ Centralizes headers, error handling, and request logic.
 """
 
 import logging
+from dataclasses import dataclass
+from typing import Any
+
 import requests
-from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,33 @@ BASE_API_URL = "https://www48.muenchen.de/buergeransicht/api/citizen"
 DEFAULT_HEADERS = {
     "Accept": "application/json",
 }
+
+
+@dataclass(frozen=True)
+class ApiResponse:
+    """Outcome of a request: JSON data on success, else HTTP status and API error codes"""
+
+    data: dict[str, Any] | None
+    status: int | None  # None when no HTTP response arrived
+    error_codes: tuple[str, ...]
+
+    @property
+    def ok(self) -> bool:
+        return self.data is not None and not self.error_codes
+
+
+def _error_codes(body: Any) -> tuple[str, ...]:
+    """errorCode values of `{"errors": [{"errorCode": ...}]}` or `{"errorCode": ...}`"""
+    if not isinstance(body, dict):
+        return ()
+    codes = [
+        e["errorCode"]
+        for e in body.get("errors") or []
+        if isinstance(e, dict) and e.get("errorCode")
+    ]
+    if body.get("errorCode"):
+        codes.append(body["errorCode"])
+    return tuple(codes)
 
 
 class MunichAPIClient:
@@ -31,7 +60,7 @@ class MunichAPIClient:
         self.timeout = timeout
         self.base_url = BASE_API_URL
 
-    def _get_headers(self, content_type: Optional[str] = None) -> Dict[str, str]:
+    def _get_headers(self, content_type: str | None = None) -> dict[str, str]:
         """
         Get headers for request.
 
@@ -47,8 +76,8 @@ class MunichAPIClient:
         return headers
 
     def get(
-        self, endpoint: str, params: Optional[Dict[str, Any]] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, endpoint: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         """
         Make GET request to Munich API.
 
@@ -81,7 +110,7 @@ class MunichAPIClient:
             logger.error(f"Unexpected error for GET {endpoint}: {e}")
             return None
 
-    def post(self, endpoint: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def post(self, endpoint: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """
         Make POST request to Munich API.
 
@@ -113,6 +142,52 @@ class MunichAPIClient:
         except Exception as e:
             logger.error(f"Unexpected error for POST {endpoint}: {e}")
             return None
+
+    def get_result(
+        self, endpoint: str, params: dict[str, Any] | None = None
+    ) -> ApiResponse:
+        """GET returning status and API error codes instead of swallowing them"""
+        return self._result(
+            "GET",
+            endpoint,
+            lambda url: requests.get(
+                url, headers=self._get_headers(), params=params, timeout=self.timeout
+            ),
+        )
+
+    def post_result(self, endpoint: str, data: dict[str, Any]) -> ApiResponse:
+        """POST returning status and API error codes instead of swallowing them"""
+        return self._result(
+            "POST",
+            endpoint,
+            lambda url: requests.post(
+                url,
+                headers=self._get_headers(content_type="application/json"),
+                json=data,
+                timeout=self.timeout,
+            ),
+        )
+
+    def _result(self, method: str, endpoint: str, send) -> ApiResponse:
+        url = f"{self.base_url}/{endpoint}"
+        try:
+            response = send(url)
+        except Exception as e:
+            logger.error(f"Request failed for {method} {endpoint}: {e}")
+            return ApiResponse(None, None, ())
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+
+        codes = _error_codes(body)
+        if response.ok and not codes:
+            return ApiResponse(body, response.status_code, ())
+        logger.warning(
+            f"HTTP {response.status_code} for {method} {endpoint}, errors={list(codes)}"
+        )
+        return ApiResponse(None, response.status_code, codes)
 
 
 # Singleton instance for convenience

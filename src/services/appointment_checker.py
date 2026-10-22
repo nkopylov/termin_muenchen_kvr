@@ -108,6 +108,11 @@ async def send_health_alert(application: Application, message: str) -> None:
             logger.error(f"Failed to send health alert: {e}")
 
 
+async def run_check_cycle(bot, today, now):
+    """One pass over all active watches"""
+    raise NotImplementedError
+
+
 async def check_and_notify(application: Application) -> None:
     """
     Background task to check for appointments and notify subscribers.

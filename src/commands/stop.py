@@ -17,6 +17,11 @@ from src.services.analytics_service import track_event
 logger = logging.getLogger(__name__)
 
 
+async def delete_user_data(bot, user_id: int, lang: str) -> None:
+    """Finalize live messages and delete every row of the user"""
+    raise NotImplementedError
+
+
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stop command"""
     user_id = update.effective_user.id

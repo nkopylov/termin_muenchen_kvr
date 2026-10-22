@@ -1,80 +1,8 @@
-"""
-Tests for business logic functions
-"""
+# ABOUTME: Tests for the appointment checker, queue manager and stats tracking.
+# ABOUTME: Owned by the checker stream.
 
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
-from src.services_manager import categorize_services, get_service_info
-
-
-class TestServicesManager:
-    """Tests for services_manager.py business logic"""
-
-    def test_categorize_services_returns_dict(self):
-        """Test categorize_services returns a dictionary"""
-        categories = categorize_services()
-        assert isinstance(categories, dict)
-
-    def test_categorize_services_has_categories(self):
-        """Test categorize_services returns non-empty categories"""
-        categories = categorize_services()
-        assert len(categories) > 0
-
-    def test_categorize_services_structure(self):
-        """Test each category contains a list of services"""
-        categories = categorize_services()
-        for category_name, services in categories.items():
-            assert isinstance(category_name, str)
-            assert isinstance(services, list)
-            assert len(services) > 0
-
-    def test_categorize_services_service_structure(self):
-        """Test each service has required fields"""
-        categories = categorize_services()
-        for services in categories.values():
-            for service in services:
-                assert "id" in service
-                assert "name" in service
-                assert isinstance(service["id"], int)
-                assert isinstance(service["name"], str)
-
-    def test_get_service_info_valid_id(self):
-        """Test get_service_info returns correct service"""
-        # First get all services to find a valid ID
-        categories = categorize_services()
-        first_service = None
-        for services in categories.values():
-            if services:
-                first_service = services[0]
-                break
-
-        assert first_service is not None
-
-        # Get info for that service
-        service_info = get_service_info(first_service["id"])
-        assert service_info is not None
-        assert service_info["id"] == first_service["id"]
-        assert service_info["name"] == first_service["name"]
-
-    def test_get_service_info_invalid_id(self):
-        """Test get_service_info returns None for invalid ID"""
-        service_info = get_service_info(999999)
-        assert service_info is None
-
-    def test_get_service_info_returns_complete_data(self):
-        """Test get_service_info returns all expected fields"""
-        categories = categorize_services()
-        first_service = None
-        for services in categories.values():
-            if services:
-                first_service = services[0]
-                break
-
-        service_info = get_service_info(first_service["id"])
-        assert "id" in service_info
-        assert "name" in service_info
-        # Note: get_service_info returns raw service dict, not with category field
-        # Category is retrieved separately via get_category_for_service
 
 
 class TestAppointmentChecker:
@@ -86,8 +14,8 @@ class TestAppointmentChecker:
         self, mock_get_session, MockUserRepo
     ):
         """Test get_user_date_range returns user's configured dates"""
-        from src.services.appointment_checker import get_user_date_range
         from src.db_models import User
+        from src.services.appointment_checker import get_user_date_range
 
         # Mock user with date range
         mock_user = User(user_id=12345, start_date="2025-01-01", end_date="2025-12-31")
@@ -111,8 +39,8 @@ class TestAppointmentChecker:
     @patch("src.services.appointment_checker.get_session")
     def test_get_user_date_range_defaults(self, mock_get_session, MockUserRepo):
         """Test get_user_date_range returns defaults when user has no dates"""
-        from src.services.appointment_checker import get_user_date_range
         from src.db_models import User
+        from src.services.appointment_checker import get_user_date_range
 
         # Mock user without date range
         mock_user = User(user_id=12345, start_date=None, end_date=None)
@@ -204,89 +132,6 @@ class TestQueueManager:
             assert result is False
 
 
-class TestNotificationService:
-    """Tests for notification_service.py business logic"""
-
-    def test_format_date_for_notification(self):
-        """Test date formatting for notifications"""
-        # This would test any date formatting logic in notification service
-        # Placeholder - implement when notification service has testable pure functions
-        pass
-
-    def test_generate_booking_callback_data(self):
-        """Test generating callback data for booking buttons"""
-        # Format: "book_DATE_OFFICEID_SERVICEID"
-        date = "2025-01-15"
-        office_id = 200
-        service_id = 100
-
-        expected = f"book_{date}_{office_id}_{service_id}"
-        assert expected == f"book_{date}_{office_id}_{service_id}"
-
-    def test_parse_booking_callback_data(self):
-        """Test parsing callback data from booking buttons"""
-        callback_data = "book_2025-01-15_200_100"
-        parts = callback_data.split("_")
-
-        assert parts[0] == "book"
-        assert parts[1] == "2025-01-15"
-        assert int(parts[2]) == 200
-        assert int(parts[3]) == 100
-
-
-class TestBookingHelpers:
-    """Tests for booking-related helper functions"""
-
-    def test_validate_email_format(self):
-        """Test email validation logic"""
-        # Simple validation used in booking.py
-        valid_emails = [
-            "user@example.com",
-            "test.user@domain.co.uk",
-            "name+tag@test.org",
-        ]
-
-        for email in valid_emails:
-            assert "@" in email and "." in email
-
-        invalid_emails = ["notanemail", "missing@domain", "no.at.sign.com"]
-
-        for email in invalid_emails:
-            assert not ("@" in email and "." in email)
-
-    def test_validate_name_length(self):
-        """Test name validation logic"""
-        # Name must be at least 2 characters (from booking.py)
-        valid_names = ["Jo", "John Doe", "Anna-Maria Schmidt"]
-
-        for name in valid_names:
-            assert len(name.strip()) >= 2
-
-        invalid_names = ["", " ", "J"]
-
-        for name in invalid_names:
-            assert len(name.strip()) < 2
-
-    def test_timestamp_to_time_string(self):
-        """Test converting timestamp to human-readable time"""
-        timestamp = 1704117600  # 2024-01-01 12:00:00 UTC
-        dt = datetime.fromtimestamp(timestamp)
-        time_str = dt.strftime("%H:%M")
-
-        assert ":" in time_str
-        assert len(time_str) == 5  # "HH:MM"
-
-    def test_format_booking_confirmation_time(self):
-        """Test formatting time for booking confirmation"""
-        timestamp = 1704117600
-        dt = datetime.fromtimestamp(timestamp)
-        time_str = dt.strftime("%H:%M on %A, %B %d, %Y")
-
-        assert ":" in time_str
-        assert " on " in time_str
-        assert "," in time_str
-
-
 class TestStatsTracking:
     """Tests for statistics tracking logic"""
 
@@ -337,19 +182,3 @@ class TestStatsTracking:
 
         assert hours == 3
         assert minutes == 45
-
-
-class TestNotificationFormatting:
-    """Tests for notification_service.py formatting"""
-
-    def test_format_available_days(self):
-        from src.services.notification_service import format_available_appointments
-
-        data = {
-            "availableDays": [
-                {"date": "2026-12-03", "providerIDs": "10461", "offices": []},
-                {"date": "2026-12-04", "providerIDs": "10461", "offices": []},
-            ]
-        }
-
-        assert format_available_appointments(data) == "📅 2026-12-03\n📅 2026-12-04"

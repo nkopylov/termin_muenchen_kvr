@@ -50,6 +50,13 @@ def build_welcome(lang: str) -> tuple[str, InlineKeyboardMarkup]:
     return t("start.welcome", lang), InlineKeyboardMarkup(keyboard)
 
 
+async def send_onboarding(
+    bot, chat_id: int, user_id: int, lang: str, returning: bool
+) -> None:
+    """Welcome with the reply keyboard, then the Find screen or My watches"""
+    raise NotImplementedError
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /start command"""
     user_id = update.effective_user.id

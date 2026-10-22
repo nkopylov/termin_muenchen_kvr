@@ -86,6 +86,19 @@ def fetch_full_payload() -> dict | None:
         return None
 
 
+def refresh_catalog() -> bool:
+    """Re-fetch the catalog; caches are replaced only when the fetch returned services"""
+    global _services_cache, _full_payload_cache
+    payload = fetch_full_payload()
+    if not payload or not payload.get("services"):
+        logger.warning("Catalog refresh failed, keeping the cached catalog")
+        return False
+    _full_payload_cache = payload
+    _services_cache = payload["services"]
+    logger.info(f"Catalog refreshed: {len(_services_cache)} services")
+    return True
+
+
 def get_services() -> list[dict]:
     """Get services (cached)"""
     global _services_cache
@@ -196,7 +209,7 @@ def get_office_name(office_id: int, lang: str | None = None) -> str:
     if lang is None:
         fallback = f"Office {office_id}"
     else:
-        fallback = t("buttons.office_fallback", lang, office_id=office_id)
+        fallback = t("watch.office_fallback", lang, office_id=office_id)
     payload = get_full_payload()
     for office in payload.get("offices", []):
         if office["id"] == office_id:

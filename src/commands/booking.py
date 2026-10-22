@@ -637,6 +637,18 @@ async def cancel_booking_conversation(
     return ConversationHandler.END
 
 
+async def booking_orphan_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Booking buttons pressed outside a running booking conversation"""
+    raise NotImplementedError
+
+
+async def end_all_booking_sessions(bot) -> int:
+    """End every booking session left from before a restart; returns how many"""
+    return 0
+
+
 # Create the conversation handler
 booking_conversation = ConversationHandler(
     entry_points=[

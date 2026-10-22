@@ -6,6 +6,7 @@ Tests for termin_tracker.py
 
 import base64
 import json
+import os
 from datetime import date, timedelta
 
 import pytest
@@ -139,3 +140,27 @@ class TestAvailability:
 
         assert get_available_days(start, end, "", "10461", "10339028") is None
         assert "captchaMissing" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("LIVE_API_TESTS") != "1",
+    reason="live city API; run with LIVE_API_TESTS=1",
+)
+async def test_watch_calendar_for_all_public_offices_of_a_service():
+    from src.services import captcha_token
+    from src.watches import availability
+
+    service_id = 1063475  # Wohnsitzanmeldung: 7 public offices
+    offices = sorted(availability.public_office_ids(service_id))
+    assert len(offices) >= 2
+    captcha_token.invalidate()
+
+    result = await availability.fetch_calendar(
+        service_id, offices, date.today(), date.today() + timedelta(days=180)
+    )
+
+    assert result.ok, result.error
+    for day in result.data["availableDays"]:
+        providers = {int(p) for p in day["providerIDs"].split(",") if p}
+        assert providers <= set(offices)

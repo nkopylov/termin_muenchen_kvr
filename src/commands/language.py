@@ -4,7 +4,6 @@
 import logging
 
 from telegram import (
-    BotCommand,
     BotCommandScopeChat,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -15,40 +14,24 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from src.commands.start import build_welcome
 from src.handlers.language_picker import build_language_picker, send_language_picker
-from src.i18n import DEFAULT_LANGUAGE, is_language_chosen, t
+from src.i18n import is_language_chosen, t
 from src.i18n.user_language import (
     CACHE_KEY,
     get_stored_language,
     set_user_language,
 )
 from src.services.analytics_service import track_event
+from src.ui.commands_menu import (  # noqa: F401  (re-exported for callers of this module)
+    BOT_COMMANDS,
+    bot_commands,
+    set_default_commands,
+)
 
 logger = logging.getLogger(__name__)
 
-BOT_COMMANDS = (
-    "start",
-    "menu",
-    "subscribe",
-    "myservices",
-    "setdates",
-    "status",
-    "help",
-    "language",
-    "stop",
-)
 GATE_FREE_COMMANDS = ("start", "language", "stop")
-GATE_FREE_CALLBACK_PREFIXES = ("lang:", "book_", "time_")
+GATE_FREE_CALLBACK_PREFIXES = ("lang:", "book_", "time_", "b1:", "s1:del")
 GATE_FREE_CALLBACKS = ("confirm_booking", "cancel_booking")
-
-
-def bot_commands(lang: str) -> list[BotCommand]:
-    return [BotCommand(name, t(f"commands.{name}", lang)) for name in BOT_COMMANDS]
-
-
-async def set_default_commands(bot) -> None:
-    """English for everyone, Russian for clients whose Telegram language is Russian"""
-    await bot.set_my_commands(bot_commands(DEFAULT_LANGUAGE))
-    await bot.set_my_commands(bot_commands("ru"), language_code="ru")
 
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

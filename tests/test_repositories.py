@@ -470,9 +470,9 @@ class TestBookingSessionRepository:
             expires_at=expires_at,
         )
 
-        # Should return False and clean up expired session
+        # Read-only: expired sessions are removed by the checker's cleanup, not here
         assert repo.is_user_in_booking(12345) is False
-        assert repo.get_session(12345) is None
+        assert repo.get_session(12345) is not None
 
     def test_cleanup_expired_sessions(self, db_session):
         """Test cleaning up all expired sessions"""
