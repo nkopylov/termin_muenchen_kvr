@@ -69,6 +69,8 @@ from src.ui.keyboard import MENU_FILTER
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+# httpx logs every request URL at INFO, and Telegram URLs contain the bot token
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 PRIVATE = filters.ChatType.PRIVATE

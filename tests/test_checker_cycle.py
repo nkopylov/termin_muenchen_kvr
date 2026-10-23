@@ -786,7 +786,7 @@ class TestHealth:
     async def test_exception_counts_as_failure(
         self, db, fresh_stats, monkeypatch, caplog
     ):
-        async def broken(bot, today, now):
+        async def broken(bot, today, now, services=None):
             raise RuntimeError("boom")
 
         monkeypatch.setattr(appointment_checker, "run_check_cycle", broken)

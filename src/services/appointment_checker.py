@@ -46,6 +46,36 @@ MAX_CONSECUTIVE_FAILURES = 5
 CATALOG_REFRESH_INTERVAL = timedelta(hours=6)
 CATALOG_RETRY_INTERVAL = timedelta(minutes=1)
 
+# Notfall-Hilfe Aufenthaltstitel: the city releases these slots on quarter-hour marks and they are
+# taken within about two minutes, so they get extra checks right after each mark.
+BURST_SERVICE_IDS = frozenset({10339027, 10339028})
+BURST_OFFSETS = (
+    timedelta(seconds=5),
+    timedelta(seconds=20),
+    timedelta(seconds=40),
+    timedelta(seconds=70),
+)
+QUARTER_HOUR = timedelta(minutes=15)
+
+
+def next_burst_at(now: datetime) -> datetime:
+    """The first burst check moment strictly after now."""
+    mark = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
+    for quarter in (mark, mark + QUARTER_HOUR):
+        for offset in BURST_OFFSETS:
+            if quarter + offset > now:
+                return quarter + offset
+    raise AssertionError("unreachable: the next quarter hour always has a later offset")
+
+
+def next_wake(now: datetime, regular_due: datetime) -> tuple[datetime, bool]:
+    """When the checker loop wakes next, and whether that wake is a burst check."""
+    burst = next_burst_at(now)
+    if burst < regular_due:
+        return burst, True
+    return regular_due, False
+
+
 # Global stats tracking
 stats = {
     "total_checks": 0,
@@ -303,8 +333,10 @@ async def _check_service(
             result.edits += 1
 
 
-async def run_check_cycle(bot, today: date, now: datetime) -> CycleResult:
-    """One pass over all active watches"""
+async def run_check_cycle(
+    bot, today: date, now: datetime, services: frozenset[int] | None = None
+) -> CycleResult:
+    """One pass over all active watches, or only those of the given services"""
     result = CycleResult()
     await process_pending_retires(bot, now)
     await _refresh_catalog_if_due(now)
@@ -317,7 +349,8 @@ async def run_check_cycle(bot, today: date, now: datetime) -> CycleResult:
 
     by_service: dict[int, list[tuple[WatchRecord, Window]]] = defaultdict(list)
     for rec, window in remaining:
-        by_service[rec.service_id].append((rec, window))
+        if services is None or rec.service_id in services:
+            by_service[rec.service_id].append((rec, window))
     for service_id, watches in by_service.items():
         await _check_service(bot, service_id, watches, now, result)
 
@@ -331,7 +364,11 @@ class HealthState:
     consecutive_failures: int = 0
 
 
-async def check_iteration(application: Application, health: HealthState) -> None:
+async def check_iteration(
+    application: Application,
+    health: HealthState,
+    services: frozenset[int] | None = None,
+) -> None:
     """One loop iteration: a check cycle plus stats, analytics and health alerts."""
     batch_start_time = time.time()
     stats["last_check_time"] = datetime.now()
@@ -340,7 +377,7 @@ async def check_iteration(application: Application, health: HealthState) -> None
 
     try:
         result = await run_check_cycle(
-            application.bot, when.today_berlin(), when.utcnow()
+            application.bot, when.today_berlin(), when.utcnow(), services
         )
         stats["total_checks"] += result.checks
         stats["successful_checks"] += result.successful
@@ -377,6 +414,8 @@ async def check_iteration(application: Application, health: HealthState) -> None
             consecutive_failures=health.consecutive_failures,
         )
 
+    if services is not None and result.checks == 0:
+        return
     await track_event(
         "appointment_check_batch",
         total_checks=result.checks,
@@ -388,9 +427,17 @@ async def check_iteration(application: Application, health: HealthState) -> None
 
 
 async def check_and_notify(application: Application) -> None:
-    """Background task: runs a check cycle every check_interval seconds, forever."""
+    """Background task: a check cycle every check_interval seconds, plus burst checks of the
+    Notfall services right after each quarter-hour mark, forever."""
     config = get_config()
     health = HealthState()
     while True:
         await check_iteration(application, health)
-        await asyncio.sleep(config.check_interval)
+        regular_due = when.utcnow() + timedelta(seconds=config.check_interval)
+        while True:
+            now = when.utcnow()
+            wake, burst = next_wake(now, regular_due)
+            await asyncio.sleep(max(0.0, (wake - now).total_seconds()))
+            if not burst:
+                break
+            await check_iteration(application, health, services=BURST_SERVICE_IDS)
