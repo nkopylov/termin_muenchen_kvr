@@ -770,7 +770,7 @@ class TestHealth:
             await check_iteration(FakeApplication(FakeBot()), health)
 
         assert [r.getMessage() for r in caplog.records] == [
-            f"Calendar query failed for service {OTHER_SERVICE}: other"
+            f"Calendar query failed for service {OTHER_SERVICE}: city API unreachable"
         ] * 2
         assert (
             fresh_stats["total_checks"],
@@ -786,7 +786,7 @@ class TestHealth:
     async def test_exception_counts_as_failure(
         self, db, fresh_stats, monkeypatch, caplog
     ):
-        async def broken(bot, today, now):
+        async def broken(bot, today, now, services=None):
             raise RuntimeError("boom")
 
         monkeypatch.setattr(appointment_checker, "run_check_cycle", broken)
