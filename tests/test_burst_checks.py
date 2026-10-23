@@ -1,12 +1,15 @@
 # ABOUTME: Tests for the extra checks right after each quarter-hour mark, when the city releases
 # ABOUTME: Notfall (emergency residence permit) slots that are gone within about two minutes.
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
 import pytest
 from sqlmodel import Session
 
+from src import services_manager
+from src.config import get_config
 from src.repositories import UserRepository, WatchRepository
 from src.services import appointment_checker
 from src.services.appointment_checker import (
@@ -69,8 +72,83 @@ class TestNextWake:
         assert next_wake(now, at(5, 30, 5)) == (at(5, 30, 5), False)
 
 
-def test_burst_services_are_the_notfall_residence_permit_services():
+@pytest.mark.asyncio
+async def test_loop_runs_notfall_bursts_between_regular_cycles(monkeypatch):
+    clock = {"now": at(5, 28, 50)}
+    calls = []
+
+    async def fake_sleep(seconds):
+        clock["now"] += timedelta(seconds=seconds)
+
+    async def fake_iteration(application, health, services=None):
+        calls.append((clock["now"], services))
+        clock["now"] += timedelta(seconds=2)
+        if len(calls) == 8:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(appointment_checker.when, "utcnow", lambda: clock["now"])
+    monkeypatch.setattr(appointment_checker.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(appointment_checker, "check_iteration", fake_iteration)
+    monkeypatch.setattr(get_config(), "check_interval", 120)
+
+    with pytest.raises(asyncio.CancelledError):
+        await appointment_checker.check_and_notify(None)
+
+    assert [(t.strftime("%H:%M:%S"), s) for t, s in calls] == [
+        ("05:28:50", None),
+        ("05:30:05", BURST_SERVICE_IDS),
+        ("05:30:20", BURST_SERVICE_IDS),
+        ("05:30:40", BURST_SERVICE_IDS),
+        ("05:30:52", None),
+        ("05:31:10", BURST_SERVICE_IDS),
+        ("05:32:54", None),
+        ("05:34:56", None),
+    ]
     assert BURST_SERVICE_IDS == frozenset({NOTFALL_WORK, NOTFALL_STUDY})
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("catalog", "today", "clock")
+async def test_burst_cycle_skips_slow_housekeeping(db, fake_availability, monkeypatch):
+    monkeypatch.setattr(appointment_checker, "_catalog_refreshed_at", None)
+    housekeeping = []
+
+    async def cleanup(bot):
+        housekeeping.append("bookings")
+
+    monkeypatch.setattr(
+        services_manager, "refresh_catalog", lambda: housekeeping.append("catalog")
+    )
+    monkeypatch.setattr(appointment_checker, "cleanup_expired_bookings", cleanup)
+    add_watch(db, 101, NOTFALL_WORK)
+    fake_availability.calendar_results = [
+        lambda _service, _offices: CallResult(True, calendar(), None)
+    ]
+
+    await run_check_cycle(FakeBot(), TODAY, NOW, services=BURST_SERVICE_IDS)
+
+    assert housekeeping == []
+    assert [call[0] for call in fake_availability.calendar_calls] == [NOTFALL_WORK]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("catalog", "today", "clock")
+async def test_regular_cycle_queries_notfall_services_first(
+    db, fake_availability, monkeypatch
+):
+    monkeypatch.setattr(appointment_checker, "_catalog_refreshed_at", NOW)
+    add_watch(db, 202, ANMELDUNG)
+    add_watch(db, 101, NOTFALL_WORK)
+    fake_availability.calendar_results = [
+        lambda _service, _offices: CallResult(True, calendar(), None)
+    ] * 2
+
+    await run_check_cycle(FakeBot(), TODAY, NOW)
+
+    assert [call[0] for call in fake_availability.calendar_calls] == [
+        NOTFALL_WORK,
+        ANMELDUNG,
+    ]
 
 
 def add_watch(db, user_id, service_id, office_id=None):

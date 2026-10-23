@@ -770,7 +770,7 @@ class TestHealth:
             await check_iteration(FakeApplication(FakeBot()), health)
 
         assert [r.getMessage() for r in caplog.records] == [
-            f"Calendar query failed for service {OTHER_SERVICE}: other"
+            f"Calendar query failed for service {OTHER_SERVICE}: city API unreachable"
         ] * 2
         assert (
             fresh_stats["total_checks"],

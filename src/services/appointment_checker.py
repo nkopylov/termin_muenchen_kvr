@@ -2,6 +2,7 @@
 # ABOUTME: alert updates per watch; also ends finished watches, keeps stats and sends health alerts.
 
 import asyncio
+import html
 import logging
 import time
 from collections import defaultdict
@@ -61,11 +62,10 @@ QUARTER_HOUR = timedelta(minutes=15)
 def next_burst_at(now: datetime) -> datetime:
     """The first burst check moment strictly after now."""
     mark = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
-    for quarter in (mark, mark + QUARTER_HOUR):
-        for offset in BURST_OFFSETS:
-            if quarter + offset > now:
-                return quarter + offset
-    raise AssertionError("unreachable: the next quarter hour always has a later offset")
+    later = [offset for offset in BURST_OFFSETS if mark + offset > now]
+    if later:
+        return mark + later[0]
+    return mark + QUARTER_HOUR + BURST_OFFSETS[0]
 
 
 def next_wake(now: datetime, regular_due: datetime) -> tuple[datetime, bool]:
@@ -115,19 +115,23 @@ def increment_bookings_completed() -> None:
 
 async def send_health_alert(
     application: Application, message: str, title: str = "⚠️ <b>Health Alert</b>"
-) -> None:
-    """Send health alert to admin if configured"""
+) -> bool:
+    """Send a health alert to the admin if configured; message is plain text.
+    Returns whether it was delivered."""
     config = get_config()
-    if config.admin_telegram_id:
-        try:
-            await application.bot.send_message(
-                chat_id=config.admin_telegram_id,
-                text=f"{title}\n\n{message}",
-                parse_mode="HTML",
-            )
-            logger.info(f"Sent health alert to admin {config.admin_telegram_id}")
-        except TelegramError as e:
-            logger.error(f"Failed to send health alert: {e}")
+    if not config.admin_telegram_id:
+        return False
+    try:
+        await application.bot.send_message(
+            chat_id=config.admin_telegram_id,
+            text=f"{title}\n\n{html.escape(message, quote=False)}",
+            parse_mode="HTML",
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send health alert: {e}")
+        return False
+    logger.info(f"Sent health alert to admin {config.admin_telegram_id}")
+    return True
 
 
 @dataclass
@@ -338,23 +342,31 @@ async def _check_service(
 async def run_check_cycle(
     bot, today: date, now: datetime, services: frozenset[int] | None = None
 ) -> CycleResult:
-    """One pass over all active watches, or only those of the given services"""
+    """One pass over all active watches, or (a burst check) only those of the given services.
+    Burst checks skip the housekeeping so their city query goes out right away."""
     result = CycleResult()
-    await process_pending_retires(bot, now)
-    await _refresh_catalog_if_due(now)
-    await cleanup_expired_bookings(bot)
+    if services is None:
+        await process_pending_retires(bot, now)
+        await _refresh_catalog_if_due(now)
+        await cleanup_expired_bookings(bot)
 
     with get_session() as session:
         active = WatchRepository(session).list_active()
+    if services is not None:
+        active = [rec for rec in active if rec.service_id in services]
     remaining = await _end_finished(bot, active, today, now, result)
-    result.ended += await _end_paused_past_deadline(bot, today, now)
+    if services is None:
+        result.ended += await _end_paused_past_deadline(bot, today, now)
 
     by_service: dict[int, list[tuple[WatchRecord, Window]]] = defaultdict(list)
     for rec, window in remaining:
-        if services is None or rec.service_id in services:
-            by_service[rec.service_id].append((rec, window))
-    for service_id, watches in by_service.items():
-        await _check_service(bot, service_id, watches, now, result)
+        by_service[rec.service_id].append((rec, window))
+    # Quarter-hour releases are taken within minutes, so their services go first
+    order = sorted(
+        by_service, key=lambda service_id: service_id not in BURST_SERVICE_IDS
+    )
+    for service_id in order:
+        await _check_service(bot, service_id, by_service[service_id], now, result)
 
     # Previous alerts of this cycle's pushes lose their buttons only after every push
     await process_pending_retires(bot, now)
@@ -367,6 +379,39 @@ class HealthState:
     alerted: bool = False  # the admin was told about the current failure streak
 
 
+async def _update_health(
+    application: Application, health: HealthState, result: CycleResult, crashed: bool
+) -> None:
+    """Track the failure streak; alert the admin once per streak and once on recovery."""
+    if result.successful and not crashed:
+        failures_before = health.consecutive_failures
+        health.consecutive_failures = result.trailing_failures
+        recovered = health.consecutive_failures < MAX_CONSECUTIVE_FAILURES
+        if health.alerted and recovered:
+            delivered = await send_health_alert(
+                application,
+                f"Checks are working again after {failures_before} failed checks.",
+                title="✅ <b>Checks recovered</b>",
+            )
+            health.alerted = not delivered
+            if not delivered:
+                return
+    else:
+        health.consecutive_failures += result.failed
+
+    if not health.alerted and health.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+        health.alerted = await send_health_alert(
+            application,
+            f"Bot has failed {health.consecutive_failures} consecutive checks!\n"
+            f"Last error: {result.last_error}",
+        )
+        await track_event(
+            "health_alert",
+            alert_type="consecutive_failures",
+            consecutive_failures=health.consecutive_failures,
+        )
+
+
 async def check_iteration(
     application: Application,
     health: HealthState,
@@ -376,8 +421,7 @@ async def check_iteration(
     batch_start_time = time.time()
     stats["last_check_time"] = datetime.now()
     result = CycleResult()
-    last_error = None
-    recovered_after = None
+    crashed = False
 
     try:
         result = await run_check_cycle(
@@ -389,18 +433,13 @@ async def check_iteration(
         stats["appointments_found_count"] += result.appointments_found
         if result.successful:
             stats["last_success_time"] = datetime.now()
-            if health.alerted:
-                recovered_after = health.consecutive_failures
-            health.consecutive_failures = result.trailing_failures
-        else:
-            health.consecutive_failures += result.failed
-        last_error = result.last_error
     except Exception as e:
         logger.exception("Error in check cycle")
+        crashed = True
+        result = CycleResult()
+        result.query_failed(str(e))
         stats["total_checks"] += 1
         stats["failed_checks"] += 1
-        health.consecutive_failures += 1
-        last_error = str(e)
         await track_event(
             "api_error",
             endpoint="check_and_notify",
@@ -408,27 +447,10 @@ async def check_iteration(
             error_message=str(e),
         )
 
-    if recovered_after is not None:
-        health.alerted = False
-        await send_health_alert(
-            application,
-            f"Checks are working again after {recovered_after} failed checks.",
-            title="✅ <b>Checks recovered</b>",
-        )
-
-    # One alert per failure streak; the recovery message above closes the streak
-    if not health.alerted and health.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-        health.alerted = True
-        await send_health_alert(
-            application,
-            f"Bot has failed {health.consecutive_failures} consecutive checks!\n"
-            f"Last error: {last_error}",
-        )
-        await track_event(
-            "health_alert",
-            alert_type="consecutive_failures",
-            consecutive_failures=health.consecutive_failures,
-        )
+    # Burst checks query a few services right after quarter-hour marks; health follows the
+    # regular cycles, which query those services too
+    if services is None:
+        await _update_health(application, health, result, crashed)
 
     if services is not None and result.checks == 0:
         return

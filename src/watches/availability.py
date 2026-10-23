@@ -47,6 +47,10 @@ class CallResult:
             return f"city API unavailable (HTTP {self.status})"
         if self.error is ApiError.CAPTCHA:
             return "captcha unavailable"
+        if self.error is ApiError.OTHER:
+            if self.status is None:
+                return "city API unreachable"
+            return f"city API error (HTTP {self.status})"
         return str(self.error)
 
 
