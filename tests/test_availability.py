@@ -212,11 +212,18 @@ class TestFetchCalendar:
             await availability.fetch_calendar(SID, [1], TODAY, TODAY)
         ).error is ApiError.OTHER
 
-    async def test_no_token_is_other_without_call(self, api, tokens):
+    async def test_no_token_is_captcha_without_call(self, api, tokens):
         tokens["fail"] = True
         result = await availability.fetch_calendar(SID, [1], TODAY, TODAY)
-        assert result == CallResult(False, None, ApiError.OTHER)
+        assert result == CallResult(False, None, ApiError.CAPTCHA)
+        assert result.describe() == "captcha unavailable"
         assert api.calls == []
+
+    async def test_server_error_is_unavailable_with_status(self, api, tokens):
+        api.replies.append(ApiResponse(None, 503, ()))
+        result = await availability.fetch_calendar(SID, [1], TODAY, TODAY)
+        assert result == CallResult(False, None, ApiError.UNAVAILABLE, 503)
+        assert result.describe() == "city API unavailable (HTTP 503)"
 
 
 @pytest.mark.asyncio
@@ -268,7 +275,8 @@ class TestFallback:
         result, _ = await availability.fetch_calendar_with_fallback(
             SID, [1, 2], TODAY, TODAY
         )
-        assert result.error is ApiError.OTHER
+        assert result.error is ApiError.UNAVAILABLE
+        assert result.status == 500
 
     async def test_success_needs_no_fallback(self, api, tokens):
         api.replies.append(ok({"availableDays": []}))

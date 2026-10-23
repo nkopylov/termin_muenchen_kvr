@@ -113,14 +113,16 @@ def increment_bookings_completed() -> None:
     stats["bookings_completed"] += 1
 
 
-async def send_health_alert(application: Application, message: str) -> None:
+async def send_health_alert(
+    application: Application, message: str, title: str = "⚠️ <b>Health Alert</b>"
+) -> None:
     """Send health alert to admin if configured"""
     config = get_config()
     if config.admin_telegram_id:
         try:
             await application.bot.send_message(
                 chat_id=config.admin_telegram_id,
-                text=f"⚠️ <b>Health Alert</b>\n\n{message}",
+                text=f"{title}\n\n{message}",
                 parse_mode="HTML",
             )
             logger.info(f"Sent health alert to admin {config.admin_telegram_id}")
@@ -283,7 +285,7 @@ async def _check_service(
     )
     all_rejected = res.error is ApiError.COMBINATION and dropped == set(office_ids)
     if not res.ok and not all_rejected:
-        error = f"service {service_id}: {res.error}"
+        error = f"service {service_id}: {res.describe()}"
         logger.warning(f"Calendar query failed for {error}")
         result.query_failed(error)
         await track_event(
@@ -362,6 +364,7 @@ async def run_check_cycle(
 @dataclass
 class HealthState:
     consecutive_failures: int = 0
+    alerted: bool = False  # the admin was told about the current failure streak
 
 
 async def check_iteration(
@@ -374,6 +377,7 @@ async def check_iteration(
     stats["last_check_time"] = datetime.now()
     result = CycleResult()
     last_error = None
+    recovered_after = None
 
     try:
         result = await run_check_cycle(
@@ -385,6 +389,8 @@ async def check_iteration(
         stats["appointments_found_count"] += result.appointments_found
         if result.successful:
             stats["last_success_time"] = datetime.now()
+            if health.alerted:
+                recovered_after = health.consecutive_failures
             health.consecutive_failures = result.trailing_failures
         else:
             health.consecutive_failures += result.failed
@@ -402,7 +408,17 @@ async def check_iteration(
             error_message=str(e),
         )
 
-    if health.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+    if recovered_after is not None:
+        health.alerted = False
+        await send_health_alert(
+            application,
+            f"Checks are working again after {recovered_after} failed checks.",
+            title="✅ <b>Checks recovered</b>",
+        )
+
+    # One alert per failure streak; the recovery message above closes the streak
+    if not health.alerted and health.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+        health.alerted = True
         await send_health_alert(
             application,
             f"Bot has failed {health.consecutive_failures} consecutive checks!\n"

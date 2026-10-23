@@ -29,6 +29,8 @@ TOKEN_MIN_TTL = 30.0
 class ApiError(StrEnum):
     TOKEN = "token"
     COMBINATION = "combination"
+    UNAVAILABLE = "unavailable"  # the city API answered with an HTTP 5xx
+    CAPTCHA = "captcha"  # no captcha token could be obtained
     OTHER = "other"
 
 
@@ -37,6 +39,15 @@ class CallResult:
     ok: bool
     data: dict | None
     error: ApiError | None
+    status: int | None = None
+
+    def describe(self) -> str:
+        """The failure reason as shown in logs and admin health alerts"""
+        if self.error is ApiError.UNAVAILABLE:
+            return f"city API unavailable (HTTP {self.status})"
+        if self.error is ApiError.CAPTCHA:
+            return "captcha unavailable"
+        return str(self.error)
 
 
 @services_manager.per_catalog
@@ -123,7 +134,7 @@ async def fetch_calendar(
     for attempt in range(2):
         token = await captcha_token.get_token(min_ttl=TOKEN_MIN_TTL)
         if token is None:
-            return CallResult(False, None, ApiError.OTHER)
+            return CallResult(False, None, ApiError.CAPTCHA)
         params = _params(service_id, office_ids, start, end, slots_day, token)
         response = await asyncio.to_thread(
             get_api_client().get_result, "available-calendar/", params
@@ -137,7 +148,9 @@ async def fetch_calendar(
             return CallResult(False, None, ApiError.TOKEN)
         if COMBINATION_ERROR in response.error_codes:
             return CallResult(False, None, ApiError.COMBINATION)
-        return CallResult(False, None, ApiError.OTHER)
+        if response.status is not None and response.status >= 500:
+            return CallResult(False, None, ApiError.UNAVAILABLE, response.status)
+        return CallResult(False, None, ApiError.OTHER, response.status)
     return CallResult(False, None, ApiError.TOKEN)
 
 
