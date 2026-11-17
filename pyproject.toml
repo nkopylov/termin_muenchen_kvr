@@ -9,18 +9,18 @@ dependencies = [
     "python-telegram-bot[rate-limiter]>=22.8",
     "python-dotenv>=1.2.4",
     # Configuration & Validation
-    "pydantic>=2.14.1",
-    "pydantic-settings>=2.16.1",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.3",
     # Database
-    "sqlmodel>=0.0.48",
+    "sqlmodel>=0.0.50",
     # Analytics
     "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "mypy>=2.4.0",
-    "ruff>=0.17.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "mypy>=2.4.1",
+    "ruff>=0.17.5",
 ]
